@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>SPD Save Slot Editor</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; max-width: 960px; margin: 16px auto; padding: 0 16px; color: #222; }
+h1 { font-size: 1.4em; margin-bottom: 4px; }
+h2 { font-size: 1.1em; margin-top: 24px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+section { margin: 16px 0; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 4px 8px; border: 1px solid #ddd; vertical-align: top; }
+th { background: #f5f5f5; text-align: left; width: 240px; }
+td input[type=number], td input[type=text], td select { width: 100%; box-sizing: border-box; }
+.warn { color: #b00; font-size: 0.85em; }
+#warnings { background: #fff8e0; padding: 8px 12px; border-left: 4px solid #f0c000; }
+.depth-row { font-family: monospace; font-size: 0.85em; color: #555; }
+button { padding: 6px 14px; font-size: 1em; cursor: pointer; }
+#status { margin-top: 8px; }
+.error { color: #b00; }
+.ok { color: #060; }
+details { margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<h1>SPD Save Slot Editor</h1>
+<p class="warn">本地工具 · 上传 slot zip → 改字段 → 下载新 zip → 游戏内 import</p>
+
+<section id="upload">
+  <h2>1. 上传</h2>
+  <input type="file" id="file" accept=".zip,.dat,.bundle">
+  <button id="parseBtn" disabled>解析</button>
+  <div id="status"></div>
+</section>
+
+<section id="warnings" style="display:none"></section>
+
+<section id="editor" style="display:none">
+  <h2>2. 编辑</h2>
+
+  <h3>meta</h3>
+  <table id="meta-table">
+    <tr><th>meta.name</th><td><input type="text" data-path="meta.name"></td></tr>
+    <tr><th>meta.depth</th><td><input type="number" data-path="meta.depth"></td></tr>
+    <tr><th>meta.level</th><td><input type="number" data-path="meta.level"></td></tr>
+    <tr><th>meta.hero_class</th><td>
+      <select data-path="meta.hero_class">
+        <option>WARRIOR</option>
+        <option>MAGE</option>
+        <option>ROGUE</option>
+        <option>HUNTRESS</option>
+        <option>CLERIC</option>
+        <option>DUELIST</option>
+      </select>
+    </td></tr>
+  </table>
+
+  <h3>game.hero</h3>
+  <table id="hero-table">
+    <tr><th>hero.HP</th><td><input type="number" data-path="game.hero.HP"></td></tr>
+    <tr><th>hero.HT</th><td><input type="number" data-path="game.hero.HT"></td></tr>
+    <tr><th>hero.pos</th><td><input type="number" data-path="game.hero.pos"></td></tr>
+    <tr><th>hero.lvl</th><td><input type="number" data-path="game.hero.lvl"></td></tr>
+    <tr><th>hero.STR</th><td><input type="number" data-path="game.hero.STR"></td></tr>
+    <tr><th>hero.exp</th><td><input type="number" data-path="game.hero.exp"></td></tr>
+  </table>
+
+  <h3>game (top-level)</h3>
+  <table id="game-table">
+    <tr><th>gold</th><td><input type="number" data-path="game.gold"></td></tr>
+    <tr><th>challenges (bitmask)</th><td><input type="number" data-path="game.challenges"></td></tr>
+    <tr><th>seed</th><td><input type="number" data-path="game.seed">
+      <span class="warn">改 seed 不同步删 depth 会有怪现象</span></td></tr>
+    <tr><th>daily</th><td>
+      <label><input type="checkbox" data-path="game.daily"> daily=true
+      <span class="warn">(改 daily=true 会被 isSaveAllowed 拒绝)</span></label>
+    </td></tr>
+  </table>
+
+  <details>
+    <summary>depths (只读)</summary>
+    <div id="depths-list"></div>
+  </details>
+
+  <details>
+    <summary>高级(可选)</summary>
+    <table id="adv-table">
+      <tr><th>hero.attackSkill</th><td><input type="number" data-path="game.hero.attackSkill"></td></tr>
+      <tr><th>hero.defenseSkill</th><td><input type="number" data-path="game.hero.defenseSkill"></td></tr>
+    </table>
+  </details>
+
+  <h2>3. 下载</h2>
+  <label><input type="checkbox" id="force-version" checked> 强制 meta.version = 896</label>
+  <button id="packBtn">下载 zip</button>
+  <div id="pack-status"></div>
+</section>
+
+<script>
+"use strict";
+
+// Original parsed data, kept for fields we don't expose in the UI.
+// On pack, we send __raw_files back so the server preserves all
+// round-trip data — including depthN-branchM.dat which the UI never
+// touches directly.
+let ORIGINAL = null;
+
+const $ = (sel) => document.querySelector(sel);
+const setStatus = (msg, cls) => {
+  const el = $("#status");
+  el.textContent = msg || "";
+  el.className = cls || "";
+};
+
+function setPath(path, value) {
+  // path like "meta.name" / "game.hero.HP" / "game.gold"
+  const parts = path.split(".");
+  let obj = ORIGINAL;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!obj[parts[i]]) obj[parts[i]] = {};
+    obj = obj[parts[i]];
+  }
+  obj[parts[parts.length - 1]] = value;
+}
+
+function getPath(path) {
+  const parts = path.split(".");
+  let obj = ORIGINAL;
+  for (const p of parts) {
+    if (obj == null) return undefined;
+    obj = obj[p];
+  }
+  return obj;
+}
+
+function populateFields() {
+  document.querySelectorAll("[data-path]").forEach((el) => {
+    const path = el.dataset.path;
+    const value = getPath(path);
+    if (el.type === "checkbox") {
+      el.checked = !!value;
+    } else {
+      el.value = (value === undefined || value === null) ? "" : String(value);
+    }
+  });
+}
+
+function collectEdits() {
+  document.querySelectorAll("[data-path]").forEach((el) => {
+    const path = el.dataset.path;
+    let value;
+    if (el.type === "checkbox") {
+      value = el.checked;
+    } else if (el.type === "number") {
+      const raw = el.value;
+      if (raw === "") return;
+      value = Number(raw);
+      if (!Number.isFinite(value)) return;
+    } else {
+      value = el.value;
+    }
+    setPath(path, value);
+  });
+}
+
+function renderDepths(depths) {
+  const container = $("#depths-list");
+  container.innerHTML = "";
+  const keys = Object.keys(depths).sort((a, b) => Number(a) - Number(b));
+  if (keys.length === 0) {
+    container.textContent = "(no depth files)";
+    return;
+  }
+  for (const k of keys) {
+    const d = depths[k];
+    const row = document.createElement("div");
+    row.className = "depth-row";
+    const summary = {
+      depth: d.depth,
+      width: d.width,
+      height: d.height,
+      cell_count: Array.isArray(d.cells) ? d.cells.length : null,
+    };
+    row.textContent = `depth${k}.dat: ${JSON.stringify(summary)}`;
+    container.appendChild(row);
+  }
+}
+
+function renderWarnings(warnings) {
+  const el = $("#warnings");
+  if (!warnings || warnings.length === 0) {
+    el.style.display = "none";
+    el.innerHTML = "";
+    return;
+  }
+  el.style.display = "block";
+  el.innerHTML = "<b>注意:</b><ul>" +
+    warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("") + "</ul>";
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
+  }[c]));
+}
+
+// Wire up events.
+$("#file").addEventListener("change", (e) => {
+  $("#parseBtn").disabled = !e.target.files.length;
+});
+
+$("#parseBtn").addEventListener("click", async () => {
+  const file = $("#file").files[0];
+  if (!file) return;
+  setStatus("解析中...", "");
+  const fd = new FormData();
+  fd.append("file", file);
+  try {
+    const resp = await fetch("/api/parse", { method: "POST", body: fd });
+    const data = await resp.json();
+    if (!resp.ok) {
+      setStatus("解析失败: " + (data.error || resp.statusText), "error");
+      return;
+    }
+    ORIGINAL = {
+      meta: data.meta || {},
+      game: data.game || {},
+      depths: data.depths || {},
+      __raw_files: data.__raw_files || {},
+    };
+    populateFields();
+    renderDepths(ORIGINAL.depths);
+    renderWarnings(data.warnings);
+    $("#editor").style.display = "block";
+    setStatus(`解析成功 (${Object.keys(ORIGINAL.__raw_files).length} files)`, "ok");
+  } catch (e) {
+    setStatus("网络错误: " + e.message, "error");
+  }
+});
+
+$("#packBtn").addEventListener("click", async () => {
+  if (!ORIGINAL) return;
+  collectEdits();
+  const forceVersion = $("#force-version").checked ? 896 : null;
+  const body = {
+    meta: ORIGINAL.meta,
+    game: ORIGINAL.game,
+    depths: ORIGINAL.depths,
+    __raw_files: ORIGINAL.__raw_files,
+    force_meta_version: forceVersion,
+  };
+  $("#pack-status").textContent = "打包中...";
+  try {
+    const resp = await fetch("/api/pack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      $("#pack-status").textContent = "失败: " + err.error;
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "slot.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    $("#pack-status").textContent = "已下载 slot.zip";
+  } catch (e) {
+    $("#pack-status").textContent = "网络错误: " + e.message;
+  }
+});
+
+// Allow Enter key to submit upload.
+$("#file").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !$("#parseBtn").disabled) $("#parseBtn").click();
+});
+</script>
+
+</body>
+</html>
