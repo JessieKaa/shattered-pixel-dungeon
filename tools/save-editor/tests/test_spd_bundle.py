@@ -429,3 +429,143 @@ def test_round_trip_hero_inventory_with_nested_container():
     assert isinstance(pouch_back["inventory"], list)
     assert pouch_back["inventory"][0]["quantity"] == 3
     assert pouch_back["inventory"][0]["plantDepth"] == 5
+
+
+# ---- 21. nested dict field set + per-field types preserved (form schema) ----
+
+
+def test_round_trip_nested_dict_preserves_field_set():
+    """The form schema editor renders every dict field as an editable input
+    keyed by inferred type. Round-trip must preserve both the field-name set
+    and the per-field runtime type (so the form re-renders with the same
+    input controls the user saw before pack)."""
+    nested_wand = {
+        "__className": "com.shatteredpixel.shatteredpixeldungeon.items.wands.WandOfMagicMissile",
+        "quantity": 1,
+        "level": 0,
+        "curriedCharges": 2,         # int
+        "partialCharge": 0.5,         # float (force non-integer)
+        "zapped": False,              # bool
+        "curseName": "Disarming",     # str (non-__className)
+    }
+    weapon = {
+        "__className": "com.shatteredpixel.shatteredpixeldungeon.items.weapon.melee.MagesStaff",
+        "quantity": 1,
+        "level": 3,
+        "cursed": False,
+        "wand": nested_wand,
+    }
+    hero = make_game()["hero"]
+    hero["weapon"] = weapon
+    game = make_game(hero=hero)
+    files = {"meta.bundle": make_meta(), "game.dat": game}
+    zip_bytes = sb.pack_slot_zip(files)
+    back = sb.read_slot_zip(zip_bytes)
+
+    w_back = back["game.dat"]["hero"]["weapon"]
+    expected_outer = set(weapon.keys())
+    assert set(w_back.keys()) == expected_outer, (
+        f"outer key set drift: {set(w_back.keys())} vs {expected_outer}"
+    )
+    # Per-field type preservation (excluding the nested wand, checked separately).
+    for k in expected_outer:
+        if k == "wand":
+            continue
+        assert type(w_back[k]) is type(weapon[k]), (
+            f"outer field {k}: type {type(w_back[k]).__name__} "
+            f"!= {type(weapon[k]).__name__}"
+        )
+
+    wand_back = w_back["wand"]
+    expected_wand = set(nested_wand.keys())
+    assert set(wand_back.keys()) == expected_wand, (
+        f"wand key set drift: {set(wand_back.keys())} vs {expected_wand}"
+    )
+    for k in expected_wand:
+        assert type(wand_back[k]) is type(nested_wand[k]), (
+            f"wand field {k}: type {type(wand_back[k]).__name__} "
+            f"!= {type(nested_wand[k]).__name__}"
+        )
+
+    # Spot-check the float field survives at full precision (form parses
+    # floats via parseFloat; JSON round-trip must not truncate).
+    assert wand_back["partialCharge"] == 0.5
+    assert isinstance(wand_back["partialCharge"], float)
+
+
+# ---- 22. list with mixed-typed items preserves each item's field set --------
+
+
+def test_round_trip_list_with_mixed_typed_items_preserves_each_item():
+    """hero.inventory can hold items with heterogeneous field sets (Food has
+    only int quantity; Waterskin adds float volume; VelvetPouch nests a list
+    of seeds). Round-trip must preserve every item's keys and per-field types
+    so the form re-render shows the same controls the user edited."""
+    food = {
+        "__className": "com.shatteredpixel.shatteredpixeldungeon.items.food.Food",
+        "quantity": 1,                # int
+        "level": 0,                   # int
+    }
+    waterskin = {
+        "__className": "com.shatteredpixel.shatteredpixeldungeon.items.Waterskin",
+        "quantity": 1,
+        "level": 0,
+        "volume": 1.5,                # float (force non-integer)
+        "quickslotpos": 2,            # int
+    }
+    seed = {
+        "__className": "com.shatteredpixel.shatteredpixeldungeon.items.Seed",
+        "quantity": 3,
+        "plantDepth": 5,
+    }
+    pouch = {
+        "__className": "com.shatteredpixel.shatteredpixeldungeon.items.bags.VelvetPouch",
+        "quantity": 1,
+        "level": 0,
+        "inventory": [seed],          # nested list of dict
+    }
+    hero = make_game()["hero"]
+    hero["inventory"] = [food, waterskin, pouch]
+    game = make_game(hero=hero)
+    files = {"meta.bundle": make_meta(), "game.dat": game}
+    zip_bytes = sb.pack_slot_zip(files)
+    back = sb.read_slot_zip(zip_bytes)
+
+    inv_back = back["game.dat"]["hero"]["inventory"]
+    assert isinstance(inv_back, list)
+    assert len(inv_back) == 3, f"inventory len drift: {len(inv_back)}"
+
+    # Item 0: Food (only int fields).
+    food_back = inv_back[0]
+    assert set(food_back.keys()) == set(food.keys())
+    for k in food:
+        assert type(food_back[k]) is type(food[k]), (
+            f"food.{k}: {type(food_back[k]).__name__} != {type(food[k]).__name__}"
+        )
+
+    # Item 1: Waterskin (mixed int + float).
+    ws_back = inv_back[1]
+    assert set(ws_back.keys()) == set(waterskin.keys())
+    for k in waterskin:
+        assert type(ws_back[k]) is type(waterskin[k]), (
+            f"waterskin.{k}: {type(ws_back[k]).__name__} "
+            f"!= {type(waterskin[k]).__name__}"
+        )
+    assert ws_back["volume"] == 1.5
+    assert isinstance(ws_back["volume"], float)
+    assert ws_back["quickslotpos"] == 2
+
+    # Item 2: VelvetPouch with nested seed list.
+    pouch_back = inv_back[2]
+    assert set(pouch_back.keys()) == set(pouch.keys())
+    assert isinstance(pouch_back["inventory"], list)
+    assert len(pouch_back["inventory"]) == 1
+    seed_back = pouch_back["inventory"][0]
+    assert set(seed_back.keys()) == set(seed.keys())
+    for k in seed:
+        assert type(seed_back[k]) is type(seed[k]), (
+            f"seed.{k}: {type(seed_back[k]).__name__} "
+            f"!= {type(seed[k]).__name__}"
+        )
+    assert seed_back["plantDepth"] == 5
+
