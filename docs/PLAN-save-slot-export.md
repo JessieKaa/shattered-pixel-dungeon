@@ -2,7 +2,7 @@
 
 **Slug**: `save-slot-export`
 **Branch**: `feature/save-slot-export` (based on `feature/local-save-slots`)
-**Date**: 2026-06-30 (rev 3 — applied codex_reviewer round-2 should-fix items)
+**Date**: 2026-06-30 (rev 4 — added headless JUnit save/load and import/export tests)
 
 ---
 
@@ -88,6 +88,42 @@ com.watabou.utils.SaveSlotBridge       importFromStream(...)              Deskto
 
 - `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/saveslot/SlotImportResult.java` — 不可变结果对象
   - `boolean ok` / `String name` / `SaveSlotMeta meta` / `String stagingRelPath` / `boolean conflict` / `String message`
+
+### 新增(core 测试)
+
+- `core/src/test/java/com/shatteredpixel/shatteredpixeldungeon/saveslot/SaveSlotIOHeadlessTest.java` — 无头 JUnit 测试,覆盖 slot 保存文件夹的 zip export/import 纯逻辑
+  - 用 `com.badlogic.gdx.backends.headless.HeadlessApplication` 初始化 `Gdx.files`,`HeadlessApplicationConfiguration` 设最小配置。
+  - 每个 test 使用独立临时目录作为 libgdx local storage(通过 headless backend 支持的 local path 或测试前覆盖 `Gdx.files` 的 local root),避免污染真实 `save_slots/`。
+  - 不启动完整 `ShatteredPixelDungeon` 场景,不创建真实 UI,只测试 `SaveSlotIO` / `SaveSlotService` 的文件 IO 与 Bundle 逻辑。
+  - 构造最小 slot 目录:`save_slots/{name}/meta.bundle` + 若干 dummy bundle/data 文件;`meta.bundle` 用 `FileUtils.bundleToFile` 写真实 `Bundle`,版本号用 `Game.versionCode`。
+  - 测试项:
+    1. `export_then_import_round_trip_preserves_slot_files_and_meta` — 构造 slot → `SaveSlotService.exportToStream` → 删除 slot → `importFromStream` + `commitImport` → 文件列表与 meta(depth/level/hero_class/version/name)一致。
+    2. `import_rejects_version_mismatch_and_cleans_staging` — zip 内 meta.version 改成 `Game.versionCode - 1`,断言 `ok=false,message=version_mismatch`,staging 目录不存在。
+    3. `import_rejects_path_traversal_entries` — 构造含 `../evil.txt` / `subdir/file` / `C:\\evil.txt` 的 zip,断言拒绝且未写出目标文件。
+    4. `import_rejects_zip_bomb_limits` — 构造超过 entry 数或累计大小上限的 zip,断言拒绝且清理 staging。
+    5. `commit_import_without_overwrite_refuses_existing_slot` — 已存在同名 slot 且 overwrite=false 时 commit 失败,原 slot 内容不变。
+    6. `commit_import_overwrite_restores_or_replaces_atomically` — overwrite=true 成功后旧 slot 被替换,`.bak/.tmp/.import-*` 无残留。
+    7. `cleanup_leftovers_removes_staging_tmp_bak_but_not_real_slots` — 构造残留目录,调用 cleanup 后只保留合法 slot。
+- `core/src/test/java/com/shatteredpixel/shatteredpixeldungeon/saveslot/SaveSlotServiceHeadlessTest.java` — 无头 JUnit 测试,覆盖 service 层 guard 与当前存档 save/load 拷贝
+  - 用 dummy `GamesInProgress.curSlot` 与 `GamesInProgress.gameFolder(curSlot)` 构造当前游戏目录,不创建真实 `Dungeon.hero` 时只测试 `loadFromSlot` 之前可独立验证的低层路径;若要覆盖 `saveToSlot`,使用最小 mock/fixture 初始化 `Dungeon.hero` 的 `heroClass/lvl/isAlive` 所需字段。
+  - 测试项:
+    1. `export_requires_valid_existing_slot` — 无效名称/不存在 slot 抛错或失败。
+    2. `daily_disables_export_import` — 临时设置 `Dungeon.daily=true`/`dailyReplay=true`,断言 `exportToStream` / `importFromStream` 被拒绝,finally 恢复静态状态。
+    3. `load_from_imported_slot_copies_into_current_game_folder` — 导入后调用 `loadFromSlot`,断言 current game folder 被替换、`GamesInProgress.setUnknown` 可安全调用(如 headless 无法完整触发 scene switch,则把 copy 部分抽出到 package-private helper 测试)。
+- `core/build.gradle` — 添加 test 依赖与任务配置
+  ```gradle
+  dependencies {
+      testImplementation 'junit:junit:4.13.2'
+      testImplementation "com.badlogicgames.gdx:gdx-backend-headless:$gdxVersion"
+      testImplementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+  }
+
+  test {
+      useJUnit()
+      systemProperty 'java.awt.headless', 'true'
+  }
+  ```
+  如果根项目已有版本变量名不是 `gdxVersion`,改用现有 libgdx 版本变量(项目事实:1.14.0),不要硬编码第二套版本号。
 
 ### 改动(core)
 
@@ -239,8 +275,37 @@ com.watabou.utils.SaveSlotBridge       importFromStream(...)              Deskto
 
 按 Architecture 段实现。JFileChooser 在 `new Thread()` 里跑,完成后 `Game.runOnRenderThread`。冲突确认用 `WndOptions`(在 render thread 弹)。
 
-### Step 7: 集成测试
+### Step 7: 无头 JUnit 测试(save/load + import/export)
 
+在手测前先补 headless JUnit,目标是把**不依赖 Android SAF UI**的核心行为全部固定下来。
+
+- 配置 `core/build.gradle`:
+  1. 增加 JUnit4、`gdx-backend-headless`、desktop natives test 依赖。
+  2. `test { useJUnit(); systemProperty 'java.awt.headless', 'true' }`。
+  3. 复用项目已有 libgdx 版本变量;如果没有公开变量,从现有依赖声明读取 1.14.0,不要引入不一致版本。
+- 测试 fixture:
+  1. `@BeforeClass` 启动一次 `HeadlessApplication` 或每个 test 启停一次,确保 `Gdx.files` / `Gdx.app` 可用。
+  2. 每个 test 使用独立临时 local root,结束后删除,避免污染真实用户存档。
+  3. 用真实 `Bundle` + `FileUtils.bundleToFile` 写 `meta.bundle`,不要手写二进制格式。
+  4. 静态全局状态(`Dungeon.daily`, `Dungeon.dailyReplay`, `GamesInProgress.curSlot`)必须在 `try/finally` 或 `@After` 恢复。
+- 必测用例:
+  1. round-trip: `save_slots/a` → `exportToStream` → 删除原 slot → `importFromStream` → `commitImport` → meta 和文件内容一致。
+  2. service save/load copy:构造 current game folder + slot folder,验证 `loadFromSlot`/可抽出的 copy helper 会替换 current game folder,且 slot 根与 `game{n}` 根仍隔离。
+  3. version mismatch:导入被拒 + staging 清理。
+  4. path traversal:拒绝 `../evil.txt`、`subdir/file`、`C:\\evil.txt`。
+  5. zip bomb:超过 64 entries 或 64MB 解压上限被拒。
+  6. conflict/overwrite:false 拒绝覆盖,overwrite:true 替换且无 `.bak/.tmp/.import-*` 残留。
+  7. cleanup leftovers:只清理 staging/tmp/bak,不删合法 slot。
+  8. daily guard:daily/dailyReplay 下 export/import 都被拒。
+- 运行命令:
+  ```bash
+  ./gradlew :core:test --tests '*SaveSlot*HeadlessTest'
+  ./gradlew :core:compileJava :android:compileDebugJavaWithJavac :desktop:compileJava
+  ```
+
+### Step 8: 集成测试
+
+- `./gradlew :core:test --tests '*SaveSlot*HeadlessTest'`
 - `./gradlew :core:compileJava`
 - `./gradlew :android:assembleDebug`
 - `adb -s 20210119085654 install -r android/build/outputs/apk/debug/android-debug.apk`
@@ -262,18 +327,22 @@ com.watabou.utils.SaveSlotBridge       importFromStream(...)              Deskto
 |---|---|---|
 | 1 | core 模块编译无 android/desktop/AWT/Swing import | `grep -rnE "^import (android|org.lwjgl|java.awt|javax.swing)" core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/saveslot/` 应为空 |
 | 2 | SPD-classes 不依赖 core | `grep -rn "com.shatteredpixel" SPD-classes/src/main/java/com/watabou/utils/SaveSlotBridge.java SPD-classes/src/main/java/com/watabou/utils/PlatformSupport.java` 应为空(SaveSlotBridge 接口完全 Java-only) |
-| 3 | Android 真机能 export slot 到 Downloads | adb 测试矩阵 #1 |
-| 4 | 能从 zip 导入并恢复 | 测试矩阵 #2 |
-| 5 | 版本不匹配拒绝导入 | 测试矩阵 #3 |
-| 6 | daily run 下按钮不可见 | 测试矩阵 #4 |
-| 7 | 名字冲突有确认流程 + 覆盖时旧 slot 不丢 | 测试矩阵 #5 |
-| 8 | import 失败不污染现有 slot | 测试矩阵 #6 |
-| 9 | zip 路径穿越 / zip bomb 防御 | 测试矩阵 #7 + #8 |
-| 10 | 死亡读档链路完全不受影响 | 测试矩阵 #9 |
-| 11 | 上游既有文件改动面 = 1(只 `PlatformSupport.java` 加 default 方法;新增 `SaveSlotBridge.java` 不算上游既有文件改动) | `git diff master...feature/save-slot-export --stat -- SPD-classes/src/main/java/com/watabou/utils/PlatformSupport.java` 仅 1 个文件;新增 `SPD-classes/.../SaveSlotBridge.java` 允许 |
-| 12 | fork 代码全部在 `saveslot/` 子包 + `android/`/`desktop/` 模块内 | 见上 Files 段 |
-| 13 | 并发安全 | 测试矩阵 #10 |
-| 14 | 启动时清理 staging/tmp/bak 残留 | 测试矩阵 #6 后续启动 |
+| 3 | 无头 JUnit 覆盖 zip export/import round-trip | `./gradlew :core:test --tests '*SaveSlot*HeadlessTest'`,用例 `export_then_import_round_trip_preserves_slot_files_and_meta` 通过 |
+| 4 | 无头 JUnit 覆盖当前存档 save/load copy 与 slot/game 目录隔离 | `SaveSlotServiceHeadlessTest.load_from_imported_slot_copies_into_current_game_folder` 或等价 copy helper 测试通过 |
+| 5 | 无头 JUnit 覆盖版本不匹配、路径穿越、zip bomb、cleanup leftovers | 对应用例全部通过,且临时目录无残留 |
+| 6 | 无头 JUnit 覆盖 conflict/overwrite 与 daily guard | overwrite=false/true 和 daily/dailyReplay 用例全部通过 |
+| 7 | Android 真机能 export slot 到 Downloads | adb 测试矩阵 #1 |
+| 8 | 能从 zip 导入并恢复 | 测试矩阵 #2 |
+| 9 | 版本不匹配拒绝导入 | 测试矩阵 #3(手测) + JUnit version mismatch |
+| 10 | daily run 下按钮不可见 | 测试矩阵 #4(手测) + JUnit daily guard |
+| 11 | 名字冲突有确认流程 + 覆盖时旧 slot 不丢 | 测试矩阵 #5(手测) + JUnit overwrite 用例 |
+| 12 | import 失败不污染现有 slot | 测试矩阵 #6(手测) + JUnit cleanup 用例 |
+| 13 | zip 路径穿越 / zip bomb 防御 | 测试矩阵 #7 + #8(手测/构造包) + JUnit 用例 |
+| 14 | 死亡读档链路完全不受影响 | 测试矩阵 #9 |
+| 15 | 上游既有文件改动面 = 1(只 `PlatformSupport.java` 加 default 方法;新增 `SaveSlotBridge.java` 不算上游既有文件改动) | `git diff master...feature/save-slot-export --stat -- SPD-classes/src/main/java/com/watabou/utils/PlatformSupport.java` 仅 1 个文件;新增 `SPD-classes/.../SaveSlotBridge.java` 允许 |
+| 16 | fork 代码全部在 `saveslot/` 子包 + `android/`/`desktop/` 模块内 | 见上 Files 段 |
+| 17 | 并发安全 | 测试矩阵 #10 |
+| 18 | 启动时清理 staging/tmp/bak 残留 | 测试矩阵 #6 后续启动 + JUnit cleanup leftovers |
 
 ## 风险与备选
 
