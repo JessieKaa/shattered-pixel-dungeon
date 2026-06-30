@@ -31,6 +31,7 @@ import com.shatteredpixel.shatteredpixeldungeon.scenes.HeroSelectScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.RankingsScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.TitleScene;
+import com.shatteredpixel.shatteredpixeldungeon.saveslot.SaveSlotService;
 import com.shatteredpixel.shatteredpixeldungeon.ui.Icons;
 import com.shatteredpixel.shatteredpixeldungeon.ui.RedButton;
 import com.shatteredpixel.shatteredpixeldungeon.ui.Window;
@@ -112,10 +113,14 @@ public class WndGame extends Window {
 		curBtn.icon(Icons.get(Icons.DISPLAY));
 		if (SPDSettings.intro()) curBtn.enable(false);
 
+		// --- Fork: save slot menu (delegates to saveslot subpackage) ---
+		SaveSlotService.addMenuButtons(this);
+		// --- Fork end ---
+
 		resize( WIDTH, pos );
 	}
-	
-	private void addButton( RedButton btn ) {
+
+	public void addButton( RedButton btn ) {
 		add( btn );
 		btn.setRect( 0, pos > 0 ? pos += GAP : 0, WIDTH, BTN_HEIGHT );
 		pos += BTN_HEIGHT;

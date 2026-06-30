@@ -171,6 +171,28 @@ public class FileUtils {
 		}
 		return result;
 	}
+
+	// --- Fork extension: used by SaveSlotService for slot import/export ---
+	//copies all files from source dir to destination dir (non-recursive)
+	//destination dir is created if it does not exist
+	public static boolean copyDir( String src, String dst ){
+		FileHandle srcDir = getFileHandle( src );
+		FileHandle dstDir = getFileHandle( dst );
+		if (srcDir == null || !srcDir.isDirectory()){
+			return false;
+		}
+		try {
+			dstDir.mkdirs();
+			for (FileHandle file : srcDir.list()){
+				if (!file.isDirectory()){
+					file.copyTo(dstDir.child(file.name()));
+				}
+			}
+			return true;
+		} catch (GdxRuntimeException e){
+			return false;
+		}
+	}
 	
 	// bundle reading
 	
