@@ -355,3 +355,77 @@ def test_read_slot_zip_accepts_branch_depth_files():
     parsed = sb.read_slot_zip(zip_bytes)
     assert "depth5-branch2.dat" in parsed, list(parsed.keys())
     assert parsed["depth5-branch2.dat"]["branch"] == 2
+
+
+# ---- 19. hero.weapon round-trip with nested wand (MagesStaff) ---------------
+
+
+def test_round_trip_hero_weapon_with_nested_wand():
+    """MagesStaff nests a wand field that is itself a dict with __className.
+    Verify the existing pack/read round-trip preserves the nested structure
+    that the new raw-JSON textarea will expose to users."""
+    nested_wand = {
+        "__className": "com.shatteredpixel.shatteredpixeldungeon.items.wands.WandOfMagicMissile",
+        "quantity": 1,
+        "level": 0,
+        "curriedCharges": 2,
+        "zapped": False,
+    }
+    weapon = {
+        "__className": "com.shatteredpixel.shatteredpixeldungeon.items.weapon.melee.MagesStaff",
+        "quantity": 1,
+        "level": 0,
+        "levelKnown": True,
+        "cursed": False,
+        "augment": "NONE",
+        "wand": nested_wand,
+    }
+    hero = make_game()["hero"]
+    hero["weapon"] = weapon
+    game = make_game(hero=hero)
+    files = {"meta.bundle": make_meta(), "game.dat": game}
+    zip_bytes = sb.pack_slot_zip(files)
+    back = sb.read_slot_zip(zip_bytes)
+    w = back["game.dat"]["hero"]["weapon"]
+    assert w["__className"].endswith("MagesStaff")
+    assert w["wand"]["__className"].endswith("WandOfMagicMissile")
+    assert w["wand"]["curriedCharges"] == 2
+
+
+# ---- 20. hero.inventory round-trip with nested container (VelvetPouch) -----
+
+
+def test_round_trip_hero_inventory_with_nested_container():
+    """VelvetPouch nests an `inventory` list of seeds. Round-trip must
+    preserve the nested array — the textarea editor allows editing this
+    whole structure as raw JSON."""
+    seed = {
+        "__className": "com.shatteredpixel.shatteredpixeldungeon.items.Seed",
+        "quantity": 3,
+        "level": 0,
+        "plantDepth": 5,
+    }
+    pouch = {
+        "__className": "com.shatteredpixel.shatteredpixeldungeon.items.bags.VelvetPouch",
+        "quantity": 1,
+        "level": 0,
+        "inventory": [seed],
+    }
+    hero = make_game()["hero"]
+    hero["inventory"] = [
+        {"__className": "com.shatteredpixel.shatteredpixeldungeon.items.food.Food",
+         "quantity": 1},
+        pouch,
+    ]
+    game = make_game(hero=hero)
+    files = {"meta.bundle": make_meta(), "game.dat": game}
+    zip_bytes = sb.pack_slot_zip(files)
+    back = sb.read_slot_zip(zip_bytes)
+    inv = back["game.dat"]["hero"]["inventory"]
+    assert len(inv) == 2
+    assert inv[0]["__className"].endswith("Food")
+    pouch_back = inv[1]
+    assert pouch_back["__className"].endswith("VelvetPouch")
+    assert isinstance(pouch_back["inventory"], list)
+    assert pouch_back["inventory"][0]["quantity"] == 3
+    assert pouch_back["inventory"][0]["plantDepth"] == 5
