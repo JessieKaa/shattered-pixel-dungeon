@@ -7,6 +7,7 @@
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; max-width: 960px; margin: 16px auto; padding: 0 16px; color: #222; }
 h1 { font-size: 1.4em; margin-bottom: 4px; }
 h2 { font-size: 1.1em; margin-top: 24px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+h3 { font-size: 1em; margin: 16px 0 8px; }
 section { margin: 16px 0; }
 table { border-collapse: collapse; width: 100%; }
 td, th { padding: 4px 8px; border: 1px solid #ddd; vertical-align: top; }
@@ -16,10 +17,22 @@ td input[type=number], td input[type=text], td select { width: 100%; box-sizing:
 #warnings { background: #fff8e0; padding: 8px 12px; border-left: 4px solid #f0c000; }
 .depth-row { font-family: monospace; font-size: 0.85em; color: #555; }
 button { padding: 6px 14px; font-size: 1em; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
 #status { margin-top: 8px; }
 .error { color: #b00; }
 .ok { color: #060; }
 details { margin-top: 12px; }
+#items-raw-edit { background: #fafafa; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; margin-top: 16px; }
+#items-raw-edit > summary { font-weight: bold; cursor: pointer; }
+.item-fieldset { margin: 12px 0; padding: 8px 12px; border: 1px solid #ccc; border-radius: 3px; }
+.item-fieldset legend { font-weight: 600; padding: 0 6px; }
+.item-fieldset textarea { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 0.85em; }
+.item-fieldset .type-hint { color: #555; font-weight: normal; font-size: 0.85em; }
+.item-fieldset .actions { margin-top: 6px; display: flex; gap: 8px; }
+.item-msg { margin-top: 6px; font-size: 0.85em; min-height: 1em; }
+.item-msg.error { color: #b00; }
+.item-msg.ok { color: #060; }
+.item-msg.warn { color: #b60; }
 </style>
 </head>
 <body>
@@ -91,6 +104,48 @@ details { margin-top: 12px; }
     </table>
   </details>
 
+  <details id="items-raw-edit">
+    <summary>高级:物品 raw JSON 编辑(谨慎)</summary>
+    <p class="warn">
+      警告:删除 <code>__className</code> 或必填字段(id/pos/quantity)会导致游戏加载崩溃。
+      不要随意修改 <code>quickslotpos</code> / 引用关系字段,本编辑器不会同步游戏内 quickslot。
+      修改数值或嵌套字段时务必先备份原 zip。
+    </p>
+
+    <fieldset class="item-fieldset" id="fs-armor">
+      <legend>hero.armor <span class="type-hint" id="armor-class">(no data)</span></legend>
+      <textarea id="armor-json" rows="12" cols="80" spellcheck="false"></textarea>
+      <div class="actions">
+        <button data-target="armor" data-action="apply">应用</button>
+        <button data-target="armor" data-action="reset">重置</button>
+        <button data-target="armor" data-action="format">格式化</button>
+      </div>
+      <div class="item-msg" id="armor-msg"></div>
+    </fieldset>
+
+    <fieldset class="item-fieldset" id="fs-weapon">
+      <legend>hero.weapon <span class="type-hint" id="weapon-class">(no data)</span></legend>
+      <textarea id="weapon-json" rows="12" cols="80" spellcheck="false"></textarea>
+      <div class="actions">
+        <button data-target="weapon" data-action="apply">应用</button>
+        <button data-target="weapon" data-action="reset">重置</button>
+        <button data-target="weapon" data-action="format">格式化</button>
+      </div>
+      <div class="item-msg" id="weapon-msg"></div>
+    </fieldset>
+
+    <fieldset class="item-fieldset" id="fs-inventory">
+      <legend>hero.inventory <span class="type-hint" id="inventory-class">(no data)</span></legend>
+      <textarea id="inventory-json" rows="12" cols="80" spellcheck="false"></textarea>
+      <div class="actions">
+        <button data-target="inventory" data-action="apply">应用</button>
+        <button data-target="inventory" data-action="reset">重置</button>
+        <button data-target="inventory" data-action="format">格式化</button>
+      </div>
+      <div class="item-msg" id="inventory-msg"></div>
+    </fieldset>
+  </details>
+
   <h2>3. 下载</h2>
   <label><input type="checkbox" id="force-version" checked> 强制 meta.version = 896</label>
   <button id="packBtn">下载 zip</button>
@@ -100,11 +155,14 @@ details { margin-top: 12px; }
 <script>
 "use strict";
 
-// Original parsed data, kept for fields we don't expose in the UI.
-// On pack, we send __raw_files back so the server preserves all
-// round-trip data — including depthN-branchM.dat which the UI never
-// touches directly.
-let ORIGINAL = null;
+// initialState: immutable deep clone of parse response. Used as the
+// reset baseline and the __className-deletion reference. Never mutated
+// after parse.
+// state: the working copy. All edits (data-path inputs, item textareas)
+// mutate this. /api/pack ships this object.
+let initialState = null;
+let state = null;
+const ITEM_FIELDS = ["armor", "weapon", "inventory"];
 
 const $ = (sel) => document.querySelector(sel);
 const setStatus = (msg, cls) => {
@@ -113,20 +171,22 @@ const setStatus = (msg, cls) => {
   el.className = cls || "";
 };
 
-function setPath(path, value) {
+function setPath(root, path, value) {
   // path like "meta.name" / "game.hero.HP" / "game.gold"
   const parts = path.split(".");
-  let obj = ORIGINAL;
+  let obj = root;
   for (let i = 0; i < parts.length - 1; i++) {
-    if (!obj[parts[i]]) obj[parts[i]] = {};
+    if (obj[parts[i]] == null || typeof obj[parts[i]] !== "object") {
+      obj[parts[i]] = {};
+    }
     obj = obj[parts[i]];
   }
   obj[parts[parts.length - 1]] = value;
 }
 
-function getPath(path) {
+function getPath(root, path) {
   const parts = path.split(".");
-  let obj = ORIGINAL;
+  let obj = root;
   for (const p of parts) {
     if (obj == null) return undefined;
     obj = obj[p];
@@ -137,7 +197,7 @@ function getPath(path) {
 function populateFields() {
   document.querySelectorAll("[data-path]").forEach((el) => {
     const path = el.dataset.path;
-    const value = getPath(path);
+    const value = getPath(state, path);
     if (el.type === "checkbox") {
       el.checked = !!value;
     } else {
@@ -160,7 +220,7 @@ function collectEdits() {
     } else {
       value = el.value;
     }
-    setPath(path, value);
+    setPath(state, path, value);
   });
 }
 
@@ -205,6 +265,285 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// ---- Item raw JSON editing -----------------------------------------------
+
+function collectClassNames(obj, basePath, out) {
+  // Walk obj (dict or Array) collecting {path, value} for every dict
+  // that has a string __className. The root dict is also recorded at
+  // basePath itself (so armor/weapon root __className is captured).
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < obj.length; i++) {
+      if (obj[i] && typeof obj[i] === "object") {
+        collectClassNames(obj[i], basePath.concat([i]), out);
+      }
+    }
+    return;
+  }
+  if (obj && typeof obj === "object") {
+    if ("__className" in obj && typeof obj.__className === "string") {
+      out.push({ path: basePath.slice(), value: obj.__className });
+    }
+    for (const k of Object.keys(obj)) {
+      const child = obj[k];
+      if (child && typeof child === "object") {
+        collectClassNames(child, basePath.concat([k]), out);
+      }
+    }
+  }
+}
+
+function pathExistsWithValueAt(obj, path) {
+  // Return true if a dict with a string __className exists at path.
+  let cur = obj;
+  for (const p of path) {
+    if (cur == null || typeof cur !== "object") return false;
+    cur = cur[p];
+  }
+  return cur != null && typeof cur === "object" && !Array.isArray(cur) &&
+    "__className" in cur && typeof cur.__className === "string";
+}
+
+function formatClassName(cn) {
+  if (typeof cn !== "string" || cn.length === 0) return "?";
+  const parts = cn.split(".");
+  return parts[parts.length - 1] || "?";
+}
+
+function formatPath(path) {
+  // path is array of keys (string) / indices (number). Format as
+  // `inventory[1].inventory[0]`-style for readability. Root (empty) → "(root)".
+  if (!Array.isArray(path) || path.length === 0) return "(root)";
+  let out = "";
+  for (let i = 0; i < path.length; i++) {
+    const seg = path[i];
+    if (typeof seg === "number" || /^\d+$/.test(String(seg))) {
+      out += `[${seg}]`;
+    } else {
+      out += (i === 0 ? "" : ".") + seg;
+    }
+  }
+  return out;
+}
+
+function setItemMsg(field, msg, cls) {
+  const el = $(`#${field}-msg`);
+  el.textContent = msg || "";
+  el.className = "item-msg" + (cls ? " " + cls : "");
+}
+
+function setFieldDisabled(field, disabled) {
+  $(`#${field}-json`).disabled = disabled;
+  document.querySelectorAll(`#fs-${field} button`).forEach((b) => {
+    b.disabled = disabled;
+  });
+}
+
+function loadItemField(field) {
+  // Populate textarea and hint from state. Handles four cases:
+  //   - hero missing/non-object: disabled
+  //   - field key missing (undefined): enabled, empty, "(none — will create)"
+  //   - field is null (e.g. hero.weapon = null = unequipped): enabled, "null" text, "(null — unequipped)"
+  //   - field has value: enabled, JSON.stringify, class-name hint
+  const hero = state && state.game && state.game.hero;
+  if (!hero || typeof hero !== "object" || Array.isArray(hero)) {
+    $(`#${field}-json`).value = "";
+    $(`#${field}-class`).textContent = "(hero missing — items disabled)";
+    setFieldDisabled(field, true);
+    return;
+  }
+  const value = hero[field];
+  const ta = $(`#${field}-json`);
+  const hint = $(`#${field}-class`);
+  if (value === undefined) {
+    ta.value = "";
+    hint.textContent = "(none — will create)";
+    setFieldDisabled(field, false);
+    return;
+  }
+  // null is a real JSON value (e.g. hero.weapon = null means unequipped).
+  // Show it as "null" so users can see/copy/round-trip it correctly.
+  ta.value = JSON.stringify(value, null, 2);
+  if (value === null) {
+    hint.textContent = field === "weapon"
+      ? "(null — unequipped)"
+      : "(null)";
+    setFieldDisabled(field, false);
+    return;
+  }
+  if (field === "inventory") {
+    const len = Array.isArray(value) ? value.length : "?";
+    const classes = Array.isArray(value) ? value.map((it) =>
+      formatClassName(it && it.__className)
+    ).join(", ") : "?";
+    hint.textContent = `(Array len=${len}: ${classes})`;
+  } else {
+    hint.textContent = `(${formatClassName(value.__className)})`;
+  }
+  setFieldDisabled(field, false);
+}
+
+function loadAllItemFields() {
+  for (const f of ITEM_FIELDS) loadItemField(f);
+}
+
+function describeJsonError(e, text) {
+  // Try to extract position from e.message (Chrome: "Unexpected token X in JSON at position N").
+  const m = /position\s+(\d+)/i.exec(e.message || "");
+  if (m) {
+    const pos = Number(m[1]);
+    const upto = text.slice(0, pos);
+    const line = upto.split("\n").length;
+    const col = pos - upto.lastIndexOf("\n");
+    return `${e.message} (line ${line} col ${col})`;
+  }
+  return e.message || String(e);
+}
+
+function validateItemType(field, value) {
+  // Returns error string or null.
+  if (field === "armor") {
+    if (value === null) {
+      return "hero.armor 不能为 null(用空对象或保留原 armor)";
+    }
+    if (typeof value !== "object" || Array.isArray(value)) {
+      return "hero.armor 必须是 JSON 对象(dict),收到 " + (Array.isArray(value) ? "Array" : typeof value);
+    }
+    return null;
+  }
+  if (field === "weapon") {
+    if (value === null) return null;  // 卸下武器
+    if (typeof value !== "object" || Array.isArray(value)) {
+      return "hero.weapon 必须是 JSON 对象(dict)或 null,收到 " + (Array.isArray(value) ? "Array" : typeof value);
+    }
+    return null;
+  }
+  // inventory
+  if (!Array.isArray(value)) {
+    return "hero.inventory 必须是 JSON 数组(Array),收到 " + typeof value;
+  }
+  return null;
+}
+
+function applyItemField(field) {
+  const hero = state && state.game && state.game.hero;
+  if (!hero || typeof hero !== "object" || Array.isArray(hero)) {
+    setItemMsg(field, "hero 不存在或不是对象,无法应用", "error");
+    return;
+  }
+  const ta = $(`#${field}-json`);
+  const text = ta.value;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    setItemMsg(field, "JSON 解析失败: " + describeJsonError(e, text), "error");
+    return;
+  }
+
+  const typeErr = validateItemType(field, parsed);
+  if (typeErr) {
+    setItemMsg(field, "类型错误: " + typeErr, "error");
+    return;
+  }
+
+  // Recursively detect __className removals between initialState and parsed.
+  const original = initialState.game.hero && initialState.game.hero[field];
+  const before = [];
+  if (original !== undefined && original !== null) {
+    collectClassNames(original, [], before);
+  }
+  const removed = [];
+  for (const entry of before) {
+    if (!pathExistsWithValueAt(parsed, entry.path)) {
+      removed.push({
+        path: formatPath(entry.path),
+        value: entry.value,
+      });
+    }
+  }
+  if (removed.length > 0) {
+    const list = removed.map((r) => `  - ${r.path} (${r.value})`).join("\n");
+    const ok = window.confirm(
+      `你删除了以下 __className,这会导致游戏加载崩溃:\n${list}\n\n继续?`
+    );
+    if (!ok) {
+      setItemMsg(field, "已取消(__className 删除未应用)", "warn");
+      return;
+    }
+  }
+
+  // Length-change prompt for inventory (informational only, not blocking).
+  if (field === "inventory" && Array.isArray(original) && Array.isArray(parsed)) {
+    if (original.length !== parsed.length) {
+      const delta = parsed.length - original.length;
+      const sign = delta > 0 ? "+" : "";
+      setItemMsg(field,
+        `提示:inventory 长度 ${original.length} → ${parsed.length} (${sign}${delta})。raw JSON 允许手动增删,风险自担`,
+        "warn");
+    } else {
+      setItemMsg(field, "", "");
+    }
+  } else {
+    setItemMsg(field, "", "");
+  }
+
+  // Apply: deep-clone parsed into state to detach from textarea.
+  hero[field] = JSON.parse(JSON.stringify(parsed));
+  if (!$(`#${field}-msg`).textContent) {
+    setItemMsg(field, "已应用(下次点'下载 zip'生效)", "ok");
+  }
+}
+
+function resetItemField(field) {
+  const hero = state && state.game && state.game.hero;
+  if (!hero || typeof hero !== "object" || Array.isArray(hero)) {
+    setItemMsg(field, "hero 不存在,无法重置", "error");
+    return;
+  }
+  const original = initialState.game.hero && initialState.game.hero[field];
+  if (original === undefined) {
+    // Field was missing at parse time: clear it from state entirely.
+    delete hero[field];
+    $(`#${field}-json`).value = "";
+    $(`#${field}-class`).textContent = "(none — will create)";
+  } else {
+    // Deep clone to detach from initialState. null is preserved as null
+    // (e.g. hero.weapon = null means unequipped).
+    hero[field] = (original === null) ? null : JSON.parse(JSON.stringify(original));
+    $(`#${field}-json`).value = JSON.stringify(original, null, 2);
+    if (original === null) {
+      $(`#${field}-class`).textContent = field === "weapon"
+        ? "(null — unequipped)"
+        : "(null)";
+    } else if (field === "inventory") {
+      const len = Array.isArray(original) ? original.length : "?";
+      const classes = Array.isArray(original) ? original.map((it) =>
+        formatClassName(it && it.__className)
+      ).join(", ") : "?";
+      $(`#${field}-class`).textContent = `(Array len=${len}: ${classes})`;
+    } else {
+      $(`#${field}-class`).textContent = `(${formatClassName(original.__className)})`;
+    }
+  }
+  setItemMsg(field, "已重置到 parse 时原值", "ok");
+}
+
+function formatItemField(field) {
+  const ta = $(`#${field}-json`);
+  const text = ta.value;
+  if (text.trim() === "") {
+    setItemMsg(field, "textarea 为空,无可格式化内容", "warn");
+    return;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    ta.value = JSON.stringify(parsed, null, 2);
+    setItemMsg(field, "已格式化(尚未应用到 state,需点'应用')", "ok");
+  } catch (e) {
+    setItemMsg(field, "JSON 解析失败: " + describeJsonError(e, text), "error");
+  }
+}
+
 // Wire up events.
 $("#file").addEventListener("change", (e) => {
   $("#parseBtn").disabled = !e.target.files.length;
@@ -223,31 +562,45 @@ $("#parseBtn").addEventListener("click", async () => {
       setStatus("解析失败: " + (data.error || resp.statusText), "error");
       return;
     }
-    ORIGINAL = {
-      meta: data.meta || {},
-      game: data.game || {},
-      depths: data.depths || {},
-      __raw_files: data.__raw_files || {},
-    };
+    // Deep clone: structuredClone if available, fallback to JSON round-trip.
+    const clone = (typeof structuredClone === "function")
+      ? structuredClone(data)
+      : JSON.parse(JSON.stringify(data));
+    initialState = clone;
+    state = JSON.parse(JSON.stringify(clone));
     populateFields();
-    renderDepths(ORIGINAL.depths);
+    renderDepths(state.depths);
     renderWarnings(data.warnings);
+    loadAllItemFields();
     $("#editor").style.display = "block";
-    setStatus(`解析成功 (${Object.keys(ORIGINAL.__raw_files).length} files)`, "ok");
+    setStatus(`解析成功 (${Object.keys(state.__raw_files || {}).length} files)`, "ok");
   } catch (e) {
     setStatus("网络错误: " + e.message, "error");
   }
 });
 
+// Item button event delegation.
+document.addEventListener("click", (e) => {
+  const t = e.target;
+  if (!(t instanceof HTMLElement)) return;
+  const target = t.dataset.target;
+  const action = t.dataset.action;
+  if (!target || !action || !ITEM_FIELDS.includes(target)) return;
+  if (t.disabled) return;
+  if (action === "apply") applyItemField(target);
+  else if (action === "reset") resetItemField(target);
+  else if (action === "format") formatItemField(target);
+});
+
 $("#packBtn").addEventListener("click", async () => {
-  if (!ORIGINAL) return;
+  if (!state) return;
   collectEdits();
   const forceVersion = $("#force-version").checked ? 896 : null;
   const body = {
-    meta: ORIGINAL.meta,
-    game: ORIGINAL.game,
-    depths: ORIGINAL.depths,
-    __raw_files: ORIGINAL.__raw_files,
+    meta: state.meta,
+    game: state.game,
+    depths: state.depths,
+    __raw_files: state.__raw_files,
     force_meta_version: forceVersion,
   };
   $("#pack-status").textContent = "打包中...";
