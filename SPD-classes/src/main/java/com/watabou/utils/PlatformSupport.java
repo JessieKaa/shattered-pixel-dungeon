@@ -80,6 +80,13 @@ public abstract class PlatformSupport {
 		return Gdx.net.openURI( uri );
 	}
 
+	// Fork extension: export/import bridge for save slots.
+	// Default returns null so the UI hides the buttons on platforms
+	// that don't override this (e.g. iOS).
+	public SaveSlotBridge saveSlotBridge(){
+		return null;
+	}
+
 	public void setOnscreenKeyboardVisible(boolean value, boolean multiline){
 		//by default ignore multiline
 		Gdx.input.setOnscreenKeyboardVisible(value, Input.OnscreenKeyboardType.Default);

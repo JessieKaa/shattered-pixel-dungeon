@@ -29,6 +29,7 @@ import com.watabou.noosa.Game;
 import com.watabou.noosa.audio.Music;
 import com.watabou.noosa.audio.Sample;
 import com.watabou.utils.DeviceCompat;
+import com.shatteredpixel.shatteredpixeldungeon.saveslot.SaveSlotService;
 import com.watabou.utils.PlatformSupport;
 
 public class ShatteredPixelDungeon extends Game {
@@ -52,6 +53,10 @@ public class ShatteredPixelDungeon extends Game {
 				com.shatteredpixel.shatteredpixeldungeon.items.keys.WornKey.class,
 				"com.shatteredpixel.shatteredpixeldungeon.items.keys.SkeletonKey" );
 
+		// Fork: capture the platform's save-slot export/import bridge.
+		// Sweep of crashed-import staging dirs is deferred to create() because
+		// Gdx.files is not yet initialised here.
+		SaveSlotService.setBridge(platform.saveSlotBridge());
 	}
 	
 	@Override
@@ -60,14 +65,17 @@ public class ShatteredPixelDungeon extends Game {
 
 		updateSystemUI();
 		SPDAction.loadBindings();
-		
+
 		Music.INSTANCE.enable( SPDSettings.music() );
 		Music.INSTANCE.volume( SPDSettings.musicVol()*SPDSettings.musicVol()/100f );
 		Sample.INSTANCE.enable( SPDSettings.soundFx() );
 		Sample.INSTANCE.volume( SPDSettings.SFXVol()*SPDSettings.SFXVol()/100f );
 
 		Sample.INSTANCE.load( Assets.Sounds.all );
-		
+
+		// Fork: now that libgdx file handles are wired up, sweep any staging/.tmp/.bak
+		// directories left behind by a crashed save-slot import.
+		SaveSlotService.cleanupLeftovers();
 	}
 
 	@Override
