@@ -40,6 +40,7 @@ import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
 import com.watabou.noosa.Game;
 import com.watabou.utils.PlatformSupport;
 import com.watabou.utils.RectF;
+import com.watabou.utils.SaveSlotBridge;
 
 import java.util.HashMap;
 import java.util.regex.Matcher;
@@ -351,5 +352,13 @@ public class AndroidPlatformSupport extends PlatformSupport {
 			return regularsplitter.split(text);
 		}
 	}
-	
+
+	// Fork extension: provide a SAF-backed save-slot export/import bridge.
+	@Override
+	public SaveSlotBridge saveSlotBridge() {
+		AndroidLauncher launcher = (AndroidLauncher) AndroidLauncher.instance;
+		if (launcher == null) return null;
+		return new AndroidSaveSlotBridge(launcher);
+	}
+
 }

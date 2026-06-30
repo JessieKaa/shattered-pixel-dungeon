@@ -35,8 +35,11 @@ import com.watabou.noosa.Game;
 import com.watabou.utils.Bundle;
 import com.watabou.utils.Callback;
 import com.watabou.utils.FileUtils;
+import com.watabou.utils.SaveSlotBridge;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -64,6 +67,14 @@ public class SaveSlotService {
 	private static final boolean LANG_ZH =
 			Locale.getDefault().getLanguage().equalsIgnoreCase("zh");
 
+	/** Serialises all slot IO so export/import/clean-up can't race save/load/delete. */
+	private static final Object IO_LOCK = new Object();
+
+	private static SaveSlotBridge bridge;
+
+	public static void setBridge(SaveSlotBridge b) { bridge = b; }
+	public static SaveSlotBridge getBridge() { return bridge; }
+
 	// ---- name & guard helpers -------------------------------------------------
 
 	public static boolean isValidName(String name) {
@@ -87,76 +98,152 @@ public class SaveSlotService {
 	// ---- core save / load / delete -------------------------------------------
 
 	public static void saveToSlot(String name) throws IOException {
-		if (!isValidName(name)) {
-			throw new IllegalArgumentException("invalid slot name: " + name);
-		}
-		if (!isSaveAllowed()) {
-			throw new IllegalStateException("save disabled for daily run");
-		}
-		if (Dungeon.hero == null || !Dungeon.hero.isAlive()) {
-			throw new IllegalStateException("hero not alive, cannot save");
-		}
+		synchronized (IO_LOCK) {
+			if (!isValidName(name)) {
+				throw new IllegalArgumentException("invalid slot name: " + name);
+			}
+			if (!isSaveAllowed()) {
+				throw new IllegalStateException("save disabled for daily run");
+			}
+			if (Dungeon.hero == null || !Dungeon.hero.isAlive()) {
+				throw new IllegalStateException("hero not alive, cannot save");
+			}
 
-		Dungeon.saveAll();
+			Dungeon.saveAll();
 
-		String src = GamesInProgress.gameFolder(GamesInProgress.curSlot);
-		String dst = slotDir(name);
+			String src = GamesInProgress.gameFolder(GamesInProgress.curSlot);
+			String dst = slotDir(name);
 
-		FileUtils.deleteDir(dst);
-		if (!FileUtils.copyDir(src, dst)) {
-			throw new IOException("copyDir failed: " + src + " -> " + dst);
+			FileUtils.deleteDir(dst);
+			if (!FileUtils.copyDir(src, dst)) {
+				throw new IOException("copyDir failed: " + src + " -> " + dst);
+			}
+
+			Bundle meta = new Bundle();
+			meta.put("name", name);
+			meta.put("version", Game.versionCode);
+			meta.put("depth", Dungeon.depth);
+			meta.put("level", Dungeon.hero.lvl);
+			meta.put("hero_class", Dungeon.hero.heroClass);
+			meta.put("saved_at", System.currentTimeMillis());
+			FileUtils.bundleToFile(dst + "/" + META_FILE, meta);
 		}
-
-		Bundle meta = new Bundle();
-		meta.put("name", name);
-		meta.put("version", Game.versionCode);
-		meta.put("depth", Dungeon.depth);
-		meta.put("level", Dungeon.hero.lvl);
-		meta.put("hero_class", Dungeon.hero.heroClass);
-		meta.put("saved_at", System.currentTimeMillis());
-		FileUtils.bundleToFile(dst + "/" + META_FILE, meta);
 	}
 
 	public static void loadFromSlot(String name) throws IOException {
-		if (!isValidName(name)) {
-			throw new IllegalArgumentException("invalid slot name: " + name);
-		}
-		if (!isSaveAllowed()) {
-			throw new IllegalStateException("load disabled for daily run");
-		}
-		if (!slotExists(name)) {
-			throw new IOException("slot not found: " + name);
-		}
+		synchronized (IO_LOCK) {
+			if (!isValidName(name)) {
+				throw new IllegalArgumentException("invalid slot name: " + name);
+			}
+			if (!isSaveAllowed()) {
+				throw new IllegalStateException("load disabled for daily run");
+			}
+			if (!slotExists(name)) {
+				throw new IOException("slot not found: " + name);
+			}
 
-		SaveSlotMeta meta = readMeta(name);
-		if (meta == null) {
-			throw new IOException("missing meta for slot: " + name);
+			SaveSlotMeta meta = readMeta(name);
+			if (meta == null) {
+				throw new IOException("missing meta for slot: " + name);
+			}
+			if (meta.version != Game.versionCode) {
+				throw new IOException("version mismatch: slot=" + meta.version + " game=" + Game.versionCode);
+			}
+
+			String src = slotDir(name);
+			String dst = GamesInProgress.gameFolder(GamesInProgress.curSlot);
+
+			FileUtils.deleteDir(dst);
+			if (!FileUtils.copyDir(src, dst)) {
+				throw new IOException("copyDir failed: " + src + " -> " + dst);
+			}
+
+			GamesInProgress.setUnknown(GamesInProgress.curSlot);
+
+			// 清除可能存在的 WndResurrect 占位符(死亡读档场景)
+			// 否则后续死亡永远不进 Rankings
+			WndResurrect.instance = null;
+
+			InterlevelScene.mode = InterlevelScene.Mode.CONTINUE;
+			Game.switchScene(InterlevelScene.class);
 		}
-		if (meta.version != Game.versionCode) {
-			throw new IOException("version mismatch: slot=" + meta.version + " game=" + Game.versionCode);
-		}
-
-		String src = slotDir(name);
-		String dst = GamesInProgress.gameFolder(GamesInProgress.curSlot);
-
-		FileUtils.deleteDir(dst);
-		if (!FileUtils.copyDir(src, dst)) {
-			throw new IOException("copyDir failed: " + src + " -> " + dst);
-		}
-
-		GamesInProgress.setUnknown(GamesInProgress.curSlot);
-
-		// 清除可能存在的 WndResurrect 占位符(死亡读档场景)
-		// 否则后续死亡永远不进 Rankings
-		WndResurrect.instance = null;
-
-		InterlevelScene.mode = InterlevelScene.Mode.CONTINUE;
-		Game.switchScene(InterlevelScene.class);
 	}
 
 	public static void deleteSlot(String name) {
-		if (!isValidName(name)) return;
-		FileUtils.deleteDir(slotDir(name));
+		synchronized (IO_LOCK) {
+			if (!isValidName(name)) return;
+			FileUtils.deleteDir(slotDir(name));
+		}
+	}
+
+	// ---- export / import ------------------------------------------------------
+
+	/**
+	 * Stream a slot's zip into the provided {@code out}. Caller owns the stream.
+	 * Verifies the slot exists and its meta is intact before exporting.
+	 */
+	public static void exportToStream(String name, OutputStream out) throws IOException {
+		synchronized (IO_LOCK) {
+			if (!isValidName(name)) {
+				throw new IllegalArgumentException("invalid slot name: " + name);
+			}
+			if (!isSaveAllowed()) {
+				throw new IllegalStateException("export disabled for daily run");
+			}
+			if (!slotExists(name)) {
+				throw new IOException("slot not found: " + name);
+			}
+			// Defensive: refuse to export a slot whose meta is missing or version-mismatched.
+			SaveSlotMeta meta = readMeta(name);
+			if (meta == null) {
+				throw new IOException("missing meta for slot: " + name);
+			}
+			if (meta.version != Game.versionCode) {
+				throw new IOException("version mismatch: slot=" + meta.version + " game=" + Game.versionCode);
+			}
+			SaveSlotIO.writeSlotToStream(name, out);
+		}
+	}
+
+	/**
+	 * Read a zip from {@code in} into a staging directory and return a descriptor.
+	 * Does NOT touch the existing slot; caller must call {@link #commitImport} or
+	 * {@link #cancelImport} afterwards.
+	 */
+	public static SlotImportResult importFromStream(InputStream in, String suggestedName) {
+		synchronized (IO_LOCK) {
+			if (!isSaveAllowed()) {
+				return SlotImportResult.fail("daily_disabled");
+			}
+			return SaveSlotIO.readSlotFromStream(in, suggestedName);
+		}
+	}
+
+	/**
+	 * Promote a staged import into {@code save_slots/{finalName}/}.
+	 * Must be called with {@code overwrite=true} if a slot with that name already
+	 * exists.
+	 */
+	public static boolean commitImport(SlotImportResult result, String finalName, boolean overwrite) {
+		synchronized (IO_LOCK) {
+			if (result == null || !result.ok || result.stagingRelPath == null) return false;
+			return SaveSlotIO.commitImport(result.stagingRelPath, finalName, overwrite);
+		}
+	}
+
+	/** Discard a staged import. */
+	public static void cancelImport(SlotImportResult result) {
+		synchronized (IO_LOCK) {
+			if (result == null || result.stagingRelPath == null) return;
+			SaveSlotIO.cleanupStaging(result.stagingRelPath);
+		}
+	}
+
+	/** Sweep stale staging/.tmp/.bak directories left by a crashed import. */
+	public static void cleanupLeftovers() {
+		synchronized (IO_LOCK) {
+			SaveSlotIO.cleanupLeftovers();
+		}
 	}
 
 	// ---- meta read / list -----------------------------------------------------
@@ -237,7 +324,7 @@ public class SaveSlotService {
 		Game.runOnRenderThread(new Callback() {
 			@Override
 			public void call() {
-				GameScene.show(new WndSaveSlotSelect(false, () -> {
+				GameScene.show(new WndSaveSlotSelect(WndSaveSlotSelect.Mode.DEATH_LOAD, () -> {
 					WndResurrect.instance = null;
 					hero.die(finalCause);
 				}));
@@ -264,7 +351,7 @@ public class SaveSlotService {
 			@Override
 			protected void onClick() {
 				wnd.hide();
-				GameScene.show(new WndSaveSlotSelect(true));
+				GameScene.show(new WndSaveSlotSelect(WndSaveSlotSelect.Mode.SAVE));
 			}
 		};
 		saveBtn.icon(Icons.get(Icons.SHPX));
@@ -274,7 +361,7 @@ public class SaveSlotService {
 			@Override
 			protected void onClick() {
 				wnd.hide();
-				GameScene.show(new WndSaveSlotSelect(false));
+				GameScene.show(new WndSaveSlotSelect(WndSaveSlotSelect.Mode.LOAD));
 			}
 		};
 		loadBtn.icon(Icons.get(Icons.DEPTH));
