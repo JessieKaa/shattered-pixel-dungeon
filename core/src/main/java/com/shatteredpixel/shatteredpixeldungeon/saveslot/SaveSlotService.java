@@ -150,13 +150,7 @@ public class SaveSlotService {
 				throw new IOException("version mismatch: slot=" + meta.version + " game=" + Game.versionCode);
 			}
 
-			String src = slotDir(name);
-			String dst = GamesInProgress.gameFolder(GamesInProgress.curSlot);
-
-			FileUtils.deleteDir(dst);
-			if (!FileUtils.copyDir(src, dst)) {
-				throw new IOException("copyDir failed: " + src + " -> " + dst);
-			}
+			copySlotToCurrentGame(name);
 
 			GamesInProgress.setUnknown(GamesInProgress.curSlot);
 
@@ -166,6 +160,25 @@ public class SaveSlotService {
 
 			InterlevelScene.mode = InterlevelScene.Mode.CONTINUE;
 			Game.switchScene(InterlevelScene.class);
+		}
+	}
+
+	static void copySlotToCurrentGame(String name) throws IOException {
+		synchronized (IO_LOCK) {
+			if (!isValidName(name)) {
+				throw new IllegalArgumentException("invalid slot name: " + name);
+			}
+			if (!slotExists(name)) {
+				throw new IOException("slot not found: " + name);
+			}
+
+			String src = slotDir(name);
+			String dst = GamesInProgress.gameFolder(GamesInProgress.curSlot);
+
+			FileUtils.deleteDir(dst);
+			if (!FileUtils.copyDir(src, dst)) {
+				throw new IOException("copyDir failed: " + src + " -> " + dst);
+			}
 		}
 	}
 
