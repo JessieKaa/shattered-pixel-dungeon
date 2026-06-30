@@ -2,7 +2,7 @@
 
 **Slug**: `save-slot-export`
 **Branch**: `feature/save-slot-export` (based on `feature/local-save-slots`)
-**Date**: 2026-06-30 (rev 4 — added headless JUnit save/load and import/export tests)
+**Date**: 2026-06-30 (rev 5 — tightened headless test fixture state management, parameterized security cases, locked down `copySlotToCurrentGame` semantics per reviewer round 1)
 
 ---
 
@@ -92,24 +92,42 @@ com.watabou.utils.SaveSlotBridge       importFromStream(...)              Deskto
 ### 新增(core 测试)
 
 - `core/src/test/java/com/shatteredpixel/shatteredpixeldungeon/saveslot/SaveSlotIOHeadlessTest.java` — 无头 JUnit 测试,覆盖 slot 保存文件夹的 zip export/import 纯逻辑
-  - 用 `com.badlogic.gdx.backends.headless.HeadlessApplication` 初始化 `Gdx.files`,`HeadlessApplicationConfiguration` 设最小配置。
-  - 每个 test 使用独立临时目录作为 libgdx local storage(通过 headless backend 支持的 local path 或测试前覆盖 `Gdx.files` 的 local root),避免污染真实 `save_slots/`。
-  - 不启动完整 `ShatteredPixelDungeon` 场景,不创建真实 UI,只测试 `SaveSlotIO` / `SaveSlotService` 的文件 IO 与 Bundle 逻辑。
-  - 构造最小 slot 目录:`save_slots/{name}/meta.bundle` + 若干 dummy bundle/data 文件;`meta.bundle` 用 `FileUtils.bundleToFile` 写真实 `Bundle`,版本号用 `Game.versionCode`。
-  - 测试项:
+  - 用 `new HeadlessApplication(new ApplicationAdapter(){}, config)` 初始化 `Gdx.files` / `Gdx.app`(传空 `ApplicationAdapter`,**不**传真实 `Game` 实例,避免走图形/纹理初始化)。`HeadlessApplicationConfiguration` 设最小配置。
+  - 每个 test 使用独立临时目录作为 libgdx local storage:`@Before` 调 `FileUtils.setDefaultFileProperties(Files.FileType.Local, tmpDir.getAbsolutePath() + "/")`,`@After` 删除 tmp 并恢复为 `Files.FileType.Local, ""`。`FileUtils` 本身无 FileHandle cache,但 default root 是 static 字段,必须显式恢复。
+  - 不启动完整 `ShatteredPixelDungeon` 场景,不创建真实 UI,只测试 `SaveSlotIO` / `SaveSlotService` 的文件 IO 与 Bundle 逻辑。测试不依赖真实 render loop。
+  - 构造最小 slot 目录:`save_slots/{name}/meta.bundle` + 若干 dummy bundle/data 文件;`meta.bundle` 用 `FileUtils.bundleToFile` 写真实 `Bundle`,版本号用 `Game.versionCode`(`@BeforeClass` 从 `System.getProperty("spd.appVersionCode")` 读取,回退 `appVersionCode` 即 896)。
+  - **全局状态 save/restore**(`@BeforeClass` / `@AfterClass`):
+    - `Game.versionCode`: save old → set test value → restore on teardown
+    - `FileUtils` default root(type+path): `@Before` set per-test tmpDir → `@After` restore to `Local, ""`
+    - `Dungeon.daily` / `Dungeon.dailyReplay`: 每个 test 用 try/finally 恢复
+    - `GamesInProgress.curSlot`: 每个 test 用 try/finally 恢复;涉及 `slotStates` 缓存的 test 调用 `GamesInProgress.setUnknown(slot)` 清除缓存
+  - **测试项**(每项独立 zip,不合并):
     1. `export_then_import_round_trip_preserves_slot_files_and_meta` — 构造 slot → `SaveSlotService.exportToStream` → 删除 slot → `importFromStream` + `commitImport` → 文件列表与 meta(depth/level/hero_class/version/name)一致。
     2. `import_rejects_version_mismatch_and_cleans_staging` — zip 内 meta.version 改成 `Game.versionCode - 1`,断言 `ok=false,message=version_mismatch`,staging 目录不存在。
-    3. `import_rejects_path_traversal_entries` — 构造含 `../evil.txt` / `subdir/file` / `C:\\evil.txt` 的 zip,断言拒绝且未写出目标文件。
-    4. `import_rejects_zip_bomb_limits` — 构造超过 entry 数或累计大小上限的 zip,断言拒绝且清理 staging。
-    5. `commit_import_without_overwrite_refuses_existing_slot` — 已存在同名 slot 且 overwrite=false 时 commit 失败,原 slot 内容不变。
-    6. `commit_import_overwrite_restores_or_replaces_atomically` — overwrite=true 成功后旧 slot 被替换,`.bak/.tmp/.import-*` 无残留。
-    7. `cleanup_leftovers_removes_staging_tmp_bak_but_not_real_slots` — 构造残留目录,调用 cleanup 后只保留合法 slot。
+    3. **path traversal 参数化**(4 个独立 zip,分别测):
+       - `import_rejects_dotdot_path` — `../evil.txt`
+       - `import_rejects_subdir_path` — `subdir/file`
+       - `import_rejects_windows_drive_path` — `C:\\evil.txt`
+       - `import_rejects_colon_in_name` — `evil:file.txt`
+       - 每个都断言 `ok=false, message=invalid_zip_entry` 且 staging 不残留。
+    4. **zip bomb 拆两个独立用例**:
+       - `import_rejects_too_many_entries` — zip 含 65 个合法 entry(> MAX_ENTRY_COUNT=64),断言 `message=too_many_entries`,staging 清理。
+       - `import_rejects_total_bytes_exceeded` — zip 含累计解压 > 64MB 的 entry(用 1 个大 entry 即可,例如 65MB),断言 `message=zip_too_large`,staging 清理。
+    5. `commit_import_without_overwrite_refuses_existing_slot` — 已存在同名 slot 且 overwrite=false 时 commit 失败,原 slot 内容不变,staging 仍存在(供 caller cancel/retry)。
+    6. `commit_import_overwrite_restores_or_replaces_atomically` — overwrite=true 成功后旧 slot 被替换,`.bak/.tmp/.import-*` 无残留,无 `.import-complete` marker 残留。
+    7. `cleanup_leftovers_removes_staging_tmp_bak_but_not_real_slots` — 构造残留目录(`.import-{uuid}` / `name.tmp` / `name.bak` + 对应或不对应 live slot),调用 cleanup 后只保留合法 slot;marker 存在的 live slot 配套 .bak 被清,marker 缺失的 live slot 被 .bak 恢复。
+    8. `import_rejects_missing_meta_bundle` — zip 不含 `meta.bundle`,断言 `message=missing_meta`,staging 清理。
+    9. `import_rejects_empty_zip` — 零 entry 的 zip,等价于 missing meta 但路径不同,断言 `message=missing_meta`,staging 清理。
+    10. `import_rejects_duplicate_entries` — 同名 entry 出现两次,第二次必须被拒(`message=invalid_zip_entry`),staging 清理。
+    11. `import_rejects_corrupted_meta_bundle` — `meta.bundle` 是垃圾字节(非合法 bundle 格式),断言 `message=meta_read_failed`,staging 清理。
+    12. `commit_import_with_missing_staging_returns_false` — staging 路径不存在或已被清掉,`commitImport` 返回 false,现有 slot 不变(轻量退化用例)。
 - `core/src/test/java/com/shatteredpixel/shatteredpixeldungeon/saveslot/SaveSlotServiceHeadlessTest.java` — 无头 JUnit 测试,覆盖 service 层 guard 与当前存档 save/load 拷贝
-  - 用 dummy `GamesInProgress.curSlot` 与 `GamesInProgress.gameFolder(curSlot)` 构造当前游戏目录,不创建真实 `Dungeon.hero` 时只测试 `loadFromSlot` 之前可独立验证的低层路径;若要覆盖 `saveToSlot`,使用最小 mock/fixture 初始化 `Dungeon.hero` 的 `heroClass/lvl/isAlive` 所需字段。
+  - 用 dummy `GamesInProgress.curSlot` 与 `GamesInProgress.gameFolder(curSlot)` 构造当前游戏目录,不创建真实 `Dungeon.hero` 时只测试 `loadFromSlot` 之前可独立验证的低层路径。
+  - 抽 package-private helper `static void copySlotToCurrentGame(String name) throws IOException`,helper 自身 `synchronized (IO_LOCK)`(Java monitor 可重入,`loadFromSlot` 已持锁时调用不死锁)。helper 校验 `isValidName`、slot 存在,只做 `deleteDir(dst)` + `copyDir(src, dst)`,失败抛 `IOException`;**不**做 scene switch / `WndResurrect.instance` / UI 行为。`loadFromSlot` 保留 daily/meta/version 校验、`GamesInProgress.setUnknown`、`WndResurrect.instance=null`、scene switch,但 copy 部分改调 helper。
   - 测试项:
-    1. `export_requires_valid_existing_slot` — 无效名称/不存在 slot 抛错或失败。
-    2. `daily_disables_export_import` — 临时设置 `Dungeon.daily=true`/`dailyReplay=true`,断言 `exportToStream` / `importFromStream` 被拒绝,finally 恢复静态状态。
-    3. `load_from_imported_slot_copies_into_current_game_folder` — 导入后调用 `loadFromSlot`,断言 current game folder 被替换、`GamesInProgress.setUnknown` 可安全调用(如 headless 无法完整触发 scene switch,则把 copy 部分抽出到 package-private helper 测试)。
+    1. `export_requires_valid_existing_slot` — 无效名称抛 `IllegalArgumentException`,不存在 slot 抛 `IOException`,并恢复 `Dungeon.daily` / `Game.versionCode` / tmp root。
+    2. `daily_disables_export_import` — 临时设置 `Dungeon.daily=true` 和 `Dungeon.dailyReplay=true`(分别覆盖),断言 `exportToStream` 抛 `IllegalStateException` / `importFromStream` 返回 `ok=false,message=daily_disabled`,finally 恢复静态状态。
+    3. `load_from_imported_slot_copies_into_current_game_folder` — 构造 slot folder 与 current `game{curSlot}` folder,调用 helper,断言 current game folder 被替换、slot 根与 `game{n}` 根仍隔离,并对该 slot 调 `GamesInProgress.setUnknown(curSlot)` 避免 `slotStates` 缓存跨 tmp root。
 - `core/build.gradle` — 添加 test 依赖与任务配置
   ```gradle
   dependencies {
@@ -121,6 +139,7 @@ com.watabou.utils.SaveSlotBridge       importFromStream(...)              Deskto
   test {
       useJUnit()
       systemProperty 'java.awt.headless', 'true'
+      systemProperty 'spd.appVersionCode', appVersionCode
   }
   ```
   如果根项目已有版本变量名不是 `gdxVersion`,改用现有 libgdx 版本变量(项目事实:1.14.0),不要硬编码第二套版本号。
@@ -281,22 +300,26 @@ com.watabou.utils.SaveSlotBridge       importFromStream(...)              Deskto
 
 - 配置 `core/build.gradle`:
   1. 增加 JUnit4、`gdx-backend-headless`、desktop natives test 依赖。
-  2. `test { useJUnit(); systemProperty 'java.awt.headless', 'true' }`。
+  2. `test { useJUnit(); systemProperty 'java.awt.headless', 'true'; systemProperty 'spd.appVersionCode', appVersionCode }`。
   3. 复用项目已有 libgdx 版本变量;如果没有公开变量,从现有依赖声明读取 1.14.0,不要引入不一致版本。
 - 测试 fixture:
-  1. `@BeforeClass` 启动一次 `HeadlessApplication` 或每个 test 启停一次,确保 `Gdx.files` / `Gdx.app` 可用。
-  2. 每个 test 使用独立临时 local root,结束后删除,避免污染真实用户存档。
-  3. 用真实 `Bundle` + `FileUtils.bundleToFile` 写 `meta.bundle`,不要手写二进制格式。
-  4. 静态全局状态(`Dungeon.daily`, `Dungeon.dailyReplay`, `GamesInProgress.curSlot`)必须在 `try/finally` 或 `@After` 恢复。
+  1. `@BeforeClass` 启动一次 `new HeadlessApplication(new ApplicationAdapter(){}, config)`,确保 `Gdx.files` / `Gdx.app` 可用;测试不依赖真实 render loop,不传真实 `Game`。
+  2. `@BeforeClass` 保存旧 `Game.versionCode`,再从 `System.getProperty("spd.appVersionCode")` 设置测试 version;`@AfterClass` 恢复旧值并 `application.exit()`。
+  3. 每个 test 使用独立临时 local root:`@Before` 设置 `FileUtils.setDefaultFileProperties(Files.FileType.Local, tmpDir + "/")`,`@After` 删除 tmp 并恢复 `Local, ""`,避免污染真实用户存档。
+  4. 用真实 `Bundle` + `FileUtils.bundleToFile` 写 `meta.bundle`,不要手写二进制格式。
+  5. 静态全局状态(`Dungeon.daily`, `Dungeon.dailyReplay`, `GamesInProgress.curSlot`)必须在 `try/finally` 或 `@After` 恢复;涉及 `GamesInProgress.check/load copy` 的测试调用 `GamesInProgress.setUnknown(slot)` 清缓存。
+  6. 当前 Gradle/JUnit 默认串行执行;若未来开启并行,这一组测试必须禁用并行或加资源锁,因为它接管 `FileUtils` / `Game.versionCode` / `Dungeon` 全局状态。
 - 必测用例:
   1. round-trip: `save_slots/a` → `exportToStream` → 删除原 slot → `importFromStream` → `commitImport` → meta 和文件内容一致。
-  2. service save/load copy:构造 current game folder + slot folder,验证 `loadFromSlot`/可抽出的 copy helper 会替换 current game folder,且 slot 根与 `game{n}` 根仍隔离。
+  2. service save/load copy:构造 current game folder + slot folder,验证 package-private `copySlotToCurrentGame` 会替换 current game folder,且 slot 根与 `game{n}` 根仍隔离;helper 自身 `synchronized(IO_LOCK)` 并只做 copy,不做 scene switch/UI。
   3. version mismatch:导入被拒 + staging 清理。
-  4. path traversal:拒绝 `../evil.txt`、`subdir/file`、`C:\\evil.txt`。
-  5. zip bomb:超过 64 entries 或 64MB 解压上限被拒。
-  6. conflict/overwrite:false 拒绝覆盖,overwrite:true 替换且无 `.bak/.tmp/.import-*` 残留。
-  7. cleanup leftovers:只清理 staging/tmp/bak,不删合法 slot。
+  4. path traversal:分别拒绝 `../evil.txt`、`subdir/file`、`C:\evil.txt`、`evil:file.txt`(独立 zip,避免只测到第一个非法 entry)。
+  5. zip bomb:分别覆盖超过 64 entries 和超过 64MB 解压上限。
+  6. conflict/overwrite:false 拒绝覆盖,overwrite:true 替换且无 `.bak/.tmp/.import-*` / `.import-complete` 残留。
+  7. cleanup leftovers:只清理 staging/tmp/bak,不删合法 slot;同时覆盖 marker-present 删除 bak、marker-missing 恢复 bak 两条路径。
   8. daily guard:daily/dailyReplay 下 export/import 都被拒。
+  9. malformed zip inputs:empty zip / missing meta / duplicate entries / corrupted meta.bundle 都拒绝并清理 staging。
+  10. commit missing staging:返回 false 且不改已有 slot。
 - 运行命令:
   ```bash
   ./gradlew :core:test --tests '*SaveSlot*HeadlessTest'
