@@ -1,13 +1,11 @@
 <template>
   <div class="nested-list">
-    <div v-if="!value || value.length === 0" class="empty-hint">
-      (空 list)
-    </div>
+    <div v-if="!value || value.length === 0" class="empty-hint">(空 list)</div>
     <draggable
       v-else
       :list="localItems"
+      :item-key="getItemKey"
       :handle="'.drag-handle'"
-      item-key="id"
       @end="onDragEnd"
     >
       <template #item="{ element, index }">
@@ -30,8 +28,7 @@
 
           <NestedObject
             :value="element"
-            @update="(key, val) => onItemFieldUpdate(index, key, val)"
-            @delete="(key) => onItemFieldDelete(index, key)"
+            @update="(newItem) => onItemFieldUpdate(index, newItem)"
           />
         </el-card>
       </template>
@@ -57,51 +54,59 @@ const emit = defineEmits<{
   (e: 'update', value: unknown[]): void
 }>()
 
-interface ItemWithId { id: number; data: unknown }
-let nextId = 1
+// localItems 直接保存 item 本身(不包装)。stable UI key 在 parallel 数组里维护。
+const localItems = ref<unknown[]>([])
+const localKeys = ref<string[]>([])
 
-const localItems = ref<ItemWithId[]>(
-  props.value.map((d) => ({ id: nextId++, data: d }))
-)
+function makeId(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  return Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
 
 watch(
   () => props.value,
   (v) => {
-    localItems.value = (v ?? []).map((d) => ({ id: nextId++, data: d }))
-  }
+    const arr = Array.isArray(v) ? v : []
+    // 尽量复用现有 key(若 item 引用相等);否则生成新 key。
+    const prevByKey = new Map<unknown, string>()
+    for (let i = 0; i < localItems.value.length; i++) {
+      prevByKey.set(localItems.value[i], localKeys.value[i])
+    }
+    localItems.value = arr.slice()
+    localKeys.value = arr.map((it) => prevByKey.get(it) ?? makeId())
+  },
+  { immediate: true, deep: true }
 )
 
+function getItemKey(item: unknown, index: number): string {
+  return localKeys.value[index] ?? makeId()
+}
+
+function emitUpdate() {
+  emit('update', localItems.value.slice())
+}
+
 function onDragEnd() {
-  emit('update', localItems.value.map((it) => it.data))
+  emitUpdate()
 }
 
 function onDelete(index: number) {
-  const next = localItems.value.slice()
-  next.splice(index, 1)
-  localItems.value = next
-  emit('update', next.map((it) => it.data))
+  localItems.value.splice(index, 1)
+  localKeys.value.splice(index, 1)
+  emitUpdate()
 }
 
 function onItemAdd(item: Record<string, unknown>) {
-  const next = [...localItems.value, { id: nextId++, data: item }]
-  localItems.value = next
-  emit('update', next.map((it) => it.data))
+  localItems.value.push(item)
+  localKeys.value.push(makeId())
+  emitUpdate()
 }
 
-function onItemFieldUpdate(index: number, key: string, val: unknown) {
-  const target = localItems.value[index]
-  if (!target) return
-  target.data = { ...(target.data as object), [key]: val }
-  emit('update', localItems.value.map((it) => it.data))
-}
-
-function onItemFieldDelete(index: number, key: string) {
-  const target = localItems.value[index]
-  if (!target) return
-  const next = { ...(target.data as object) }
-  delete (next as any)[key]
-  target.data = next
-  emit('update', localItems.value.map((it) => it.data))
+function onItemFieldUpdate(index: number, newItem: Record<string, unknown>) {
+  localItems.value[index] = newItem
+  emitUpdate()
 }
 </script>
 

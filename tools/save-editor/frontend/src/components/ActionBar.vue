@@ -96,7 +96,6 @@ async function onDownload() {
 function onReset() {
   bundleStore.resetToOriginal()
   historyStore.clear()
-  historyStore.pushSnapshot()
   ElMessage.success('已重置')
 }
 </script>

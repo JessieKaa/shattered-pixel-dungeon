@@ -1,16 +1,18 @@
 <template>
   <div class="nested-dict">
-    <div v-if="sortedKeys.length === 0" class="empty-hint">(空 dict)</div>
+    <div v-if="allKeys.length === 0" class="empty-hint">(空 dict)</div>
+
+    <!-- 叶子字段(bool/int/float/str/null/unknown + 只读 __className)-->
     <FieldRow
-      v-for="k in sortedKeys"
+      v-for="k in leafKeys"
       :key="k"
       :key-name="k"
-      :value="(value as Record<string, unknown>)[k]"
-      @update="(key, val) => onFieldUpdate(key, val)"
-      @delete="(key) => onFieldDelete(key)"
+      :value="local[k]"
+      @update="(_key, val) => onLeafUpdate(k, val)"
+      @delete="() => onLeafDelete(k)"
     />
 
-    <!-- 嵌套 dict/list 折叠区(由 FieldRow 已渲染则跳过,这里独立显示) -->
+    <!-- 嵌套 dict / list:递归 + collapse -->
     <el-collapse v-if="nestedEntries.length > 0" v-model="activeNested">
       <el-collapse-item
         v-for="[k, v] in nestedEntries"
@@ -20,15 +22,14 @@
       >
         <NestedObject
           v-if="inferType(v) === 'dict'"
-          :value="v"
-          @update="(key, val) => onFieldUpdate(k, val)"
-          @delete="(key) => onFieldDelete(k)"
+          :value="local[k]"
+          @update="(newVal) => onChildUpdate(k, newVal)"
         />
         <NestedList
           v-else-if="inferType(v) === 'list'"
           :value="v as unknown[]"
           :field-key="k"
-          @update="(val) => onFieldUpdate(k, val)"
+          @update="(newVal) => onChildUpdate(k, newVal)"
         />
       </el-collapse-item>
     </el-collapse>
@@ -50,8 +51,7 @@ import type { FieldType } from '@/types'
 
 const props = defineProps<{ value: unknown }>()
 const emit = defineEmits<{
-  (e: 'update', key: string, value: unknown): void
-  (e: 'delete', key: string): void
+  (e: 'update', newVal: Record<string, unknown>): void
 }>()
 
 const local = ref<Record<string, unknown>>({})
@@ -69,17 +69,18 @@ watch(
 )
 
 const allKeys = computed(() => Object.keys(local.value))
-const sortedKeys = computed(() => {
-  // __className 永远第一;其余字母序
-  const keys = allKeys.value.filter(
-    (k) => inferType(local.value[k]) !== 'dict' && inferType(local.value[k]) !== 'list'
-  )
-  keys.sort((a, b) => {
-    if (a === '__className') return -1
-    if (b === '__className') return 1
-    return a.localeCompare(b)
-  })
-  return keys
+
+const leafKeys = computed(() => {
+  return allKeys.value
+    .filter((k) => {
+      const t = inferType(local.value[k])
+      return t !== 'dict' && t !== 'list'
+    })
+    .sort((a, b) => {
+      if (a === '__className') return -1
+      if (b === '__className') return 1
+      return a.localeCompare(b)
+    })
 })
 
 const nestedEntries = computed(() => {
@@ -88,8 +89,7 @@ const nestedEntries = computed(() => {
     const t = inferType(local.value[k])
     if (t === 'dict' || t === 'list') entries.push([k, local.value[k]])
   }
-  entries.sort((a, b) => a[0].localeCompare(b[0]))
-  return entries
+  return entries.sort((a, b) => a[0].localeCompare(b[0]))
 })
 
 const activeNested = ref<string[]>([])
@@ -110,25 +110,31 @@ function summary(v: unknown): string {
   return t
 }
 
-function onFieldUpdate(key: string, val: unknown) {
-  // 触发响应式:写入新对象
-  local.value = { ...local.value, [key]: val }
-  emit('update', key, val)
-  // 自身 update event 是字段级,父组件需要重建整个 dict
-  // 这里 emit 多次事件以满足外层"用 path 写入"的需要
+function emitUpdate() {
+  emit('update', { ...local.value })
 }
 
-function onFieldDelete(key: string) {
+function onLeafUpdate(k: string, val: unknown) {
+  local.value = { ...local.value, [k]: val }
+  emitUpdate()
+}
+
+function onLeafDelete(k: string) {
   const next = { ...local.value }
-  delete next[key]
+  delete next[k]
   local.value = next
-  emit('delete', key)
+  emitUpdate()
+}
+
+function onChildUpdate(k: string, newVal: unknown) {
+  local.value = { ...local.value, [k]: newVal }
+  emitUpdate()
 }
 
 function onFieldAdd(name: string, type: FieldType) {
   const def = defaultValue(type)
   local.value = { ...local.value, [name]: def }
-  emit('update', name, def)
+  emitUpdate()
 }
 
 function defaultValue(type: FieldType): unknown {
