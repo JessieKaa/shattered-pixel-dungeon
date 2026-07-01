@@ -152,27 +152,65 @@ function applyField(key: FieldKey) {
     return
   }
 
+  // 类型校验 — 与旧 templates/index.html:validateItemType 一致:
+  // - armor: 拒 null,必须是 dict
+  // - weapon: 允许 dict 或 null
+  // - inventory: 必须是 Array
   if (key === 'armor') {
-    if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
+    if (parsed === null) {
       msgType.value = 'error'
-      msg[key] = 'hero.armor 必须是 dict 或 null'
+      msg[key] = 'hero.armor 不能为 null(用空对象或保留原 armor)'
+      ElMessage.error(msg[key])
+      return
+    }
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      msgType.value = 'error'
+      const got = Array.isArray(parsed) ? 'Array' : typeof parsed
+      msg[key] = `hero.armor 必须是 JSON 对象(dict),收到 ${got}`
       ElMessage.error(msg[key])
       return
     }
   } else if (key === 'weapon') {
     if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
       msgType.value = 'error'
-      msg[key] = 'hero.weapon 必须是 dict 或 null'
+      const got = Array.isArray(parsed) ? 'Array' : typeof parsed
+      msg[key] = `hero.weapon 必须是 JSON 对象(dict)或 null,收到 ${got}`
       ElMessage.error(msg[key])
       return
     }
   } else if (key === 'inventory') {
     if (!Array.isArray(parsed)) {
       msgType.value = 'error'
-      msg[key] = 'hero.inventory 必须是 list'
+      msg[key] = `hero.inventory 必须是 JSON 数组(Array),收到 ${typeof parsed}`
       ElMessage.error(msg[key])
       return
     }
+  }
+
+  // __className 删除检测 — 与旧版 applyItemField 一致:
+  // 递归收集 original 中所有 __className 路径,若 parsed 在对应路径
+  // 不再有 __className(被删字段或整段 dict 被替换为非 dict),拒绝应用。
+  // 这类 zip 游戏加载会崩,严格模式直接 reject(不让用户强行)。
+  const original = readRaw(key)
+  const before: { path: (string | number)[]; value: string }[] = []
+  if (original !== undefined && original !== null) {
+    collectClassNames(original, [], before)
+  }
+  const removed: { path: string; value: string }[] = []
+  for (const entry of before) {
+    if (!pathExistsWithClassName(parsed, entry.path)) {
+      removed.push({ path: formatPath(entry.path), value: entry.value })
+    }
+  }
+  if (removed.length > 0) {
+    msgType.value = 'error'
+    const list = removed.map((r) => `  - ${r.path} (${r.value})`).join('\n')
+    msg[key] = `检测到 __className 删除,拒绝应用:\n${list}`
+    ElMessage.error({
+      message: `字段 ${key} 检测到 ${removed.length} 处 __className 删除,已拒绝应用(检查 msg 区域)`,
+      duration: 5000,
+    })
+    return
   }
 
   historyStore.pushSnapshot()
@@ -181,6 +219,72 @@ function applyField(key: FieldKey) {
   msgType.value = 'ok'
   msg[key] = `已应用 ${key} → store`
   ElMessage.success(`已应用 ${key}`)
+}
+
+/**
+ * 递归收集所有 dict(含 root)的 __className 路径。
+ * 与旧 templates/index.html:collectClassNames 等价。
+ */
+function collectClassNames(
+  obj: unknown,
+  basePath: (string | number)[],
+  out: { path: (string | number)[]; value: string }[]
+) {
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < obj.length; i++) {
+      if (obj[i] && typeof obj[i] === 'object') {
+        collectClassNames(obj[i], basePath.concat([i]), out)
+      }
+    }
+    return
+  }
+  if (obj && typeof obj === 'object') {
+    const o = obj as Record<string, unknown>
+    if ('__className' in o && typeof o.__className === 'string') {
+      out.push({ path: basePath.slice(), value: o.__className })
+    }
+    for (const k of Object.keys(o)) {
+      const child = o[k]
+      if (child && typeof child === 'object') {
+        collectClassNames(child, basePath.concat([k]), out)
+      }
+    }
+  }
+}
+
+/**
+ * parsed 中对应 path 处是否仍是 dict 且带 string __className。
+ */
+function pathExistsWithClassName(
+  parsed: unknown,
+  path: (string | number)[]
+): boolean {
+  let cur: unknown = parsed
+  for (const p of path) {
+    if (cur === null || typeof cur !== 'object') return false
+    cur = (cur as Record<string | number, unknown>)[p as any]
+  }
+  return (
+    cur !== null &&
+    typeof cur === 'object' &&
+    !Array.isArray(cur) &&
+    '__className' in (cur as object) &&
+    typeof (cur as Record<string, unknown>).__className === 'string'
+  )
+}
+
+function formatPath(path: (string | number)[]): string {
+  if (path.length === 0) return '(root)'
+  let out = ''
+  for (let i = 0; i < path.length; i++) {
+    const seg = path[i]
+    if (typeof seg === 'number' || /^\d+$/.test(String(seg))) {
+      out += `[${seg}]`
+    } else {
+      out += (i === 0 ? '' : '.') + seg
+    }
+  }
+  return out
 }
 
 function formatField(key: FieldKey) {
