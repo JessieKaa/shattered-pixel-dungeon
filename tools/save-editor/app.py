@@ -2,27 +2,37 @@
 fields, pack edited values back into a zip.
 
 Run:
-    python app.py
-    # open http://127.0.0.1:5000
+    # Development (with Vite dev server on :5173):
+    cd frontend && npm run dev
+    PORT=5001 python app.py
+
+    # Production (serve pre-built Vue SPA):
+    cd frontend && npm run build
+    PORT=5001 python app.py
+    # open http://127.0.0.1:5001
 
 Endpoints:
-    GET  /            -> index.html
-    POST /api/parse   multipart file upload -> JSON {meta, game, depths, warnings}
-    POST /api/pack    JSON {meta, game, depths, force_meta_version?} -> zip bytes
+    GET  /                -> SPA index.html (from frontend/dist)
+    GET  /assets/<path>   -> Vite-built JS/CSS chunks
+    POST /api/parse       multipart file upload -> JSON {meta, game, depths, warnings, __raw_files}
+    POST /api/pack        JSON {meta, game, depths, __raw_files, force_meta_version?} -> zip bytes
 """
 
 from __future__ import annotations
 
 import io
+import os
 import re
 from typing import Any
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, request, send_file, send_from_directory
 
 import spd_bundle
 
 app = Flask(__name__, template_folder="templates")
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB upload cap
+
+FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 
 # Editable field whitelist. Anything outside this list is preserved untouched
@@ -95,7 +105,17 @@ def _handle_too_large(e):
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    if not os.path.exists(os.path.join(FRONTEND_DIST, "index.html")):
+        return (
+            "Frontend not built. Run: cd frontend && npm install && npm run build",
+            503,
+        )
+    return send_from_directory(FRONTEND_DIST, "index.html")
+
+
+@app.get("/assets/<path:path>")
+def assets(path):
+    return send_from_directory(os.path.join(FRONTEND_DIST, "assets"), path)
 
 
 @app.post("/api/parse")
@@ -187,6 +207,5 @@ def pack():
 
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", "5000"))
     app.run(host="127.0.0.1", port=port, debug=True)
