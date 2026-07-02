@@ -138,4 +138,29 @@ label {
   font-family: monospace;
   min-width: 60px;
 }
+
+@media (max-width: 768px) {
+  .field-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+  label,
+  label.readonly-label {
+    min-width: 0;
+    width: 100%;
+    font-size: 0.85em;
+  }
+  .type-tag {
+    min-width: 0;
+    font-size: 0.7em;
+    align-self: flex-end;
+  }
+  .value-input,
+  .value-input:deep(.el-input),
+  .value-input:deep(.el-input__wrapper),
+  .field-row:deep(.el-input-number) {
+    width: 100%;
+  }
+}
 </style>

@@ -328,4 +328,14 @@ function validateField(key: FieldKey) {
 .msg.ok {
   color: var(--el-color-success);
 }
+
+@media (max-width: 768px) {
+  .toolbar {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .monaco-wrapper {
+    height: 240px;
+  }
+}
 </style>

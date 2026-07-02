@@ -193,4 +193,14 @@ function defaultValue(type: FieldType): unknown {
   font-weight: normal;
   font-size: 0.9em;
 }
+
+@media (max-width: 768px) {
+  .nested-dict {
+    margin: 4px 0;
+    padding-left: 4px;
+  }
+  .nested-summary {
+    font-size: 0.8em;
+  }
+}
 </style>
