@@ -13,7 +13,7 @@
           <div class="item-row">
             <span class="drag-handle" title="拖拽排序">⋮⋮</span>
             <strong class="item-title">
-              #{{ index }} · {{ formatClassName((element as any)?.__className) }}
+              #{{ index }} · <ItemLabel :class-name="(element as any)?.__className" />
             </strong>
             <el-popconfirm
               title="确认删除该项?"
@@ -44,7 +44,7 @@ import { ref, watch } from 'vue'
 import draggable from 'vuedraggable'
 import NestedObject from './NestedObject.vue'
 import AddItemDialog from './AddItemDialog.vue'
-import { formatClassName } from '@/composables/useFieldType'
+import ItemLabel from './ItemLabel.vue'
 
 const props = defineProps<{
   value: unknown[]

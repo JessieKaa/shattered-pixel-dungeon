@@ -55,7 +55,8 @@ import FieldRow from './FieldRow.vue'
 import FieldLabel from './FieldLabel.vue'
 import NestedList from './NestedList.vue'
 import AddFieldDialog from './AddFieldDialog.vue'
-import { inferType, formatClassName } from '@/composables/useFieldType'
+import { inferType } from '@/composables/useFieldType'
+import { itemLabel } from '@/composables/useItemLabel'
 import type { FieldType } from '@/types'
 
 const props = defineProps<{
@@ -115,12 +116,17 @@ function summary(v: unknown): string {
   const t = inferType(v)
   if (t === 'dict') {
     const cn = (v as any)?.__className
-    return cn ? formatClassName(cn) : 'dict'
+    if (!cn) return 'dict'
+    const info = itemLabel(cn)
+    return info.zh ? `${info.zh}(${info.fallback})` : info.fallback
   }
   if (t === 'list') {
     const len = Array.isArray(v) ? v.length : 0
     const classes = Array.isArray(v)
-      ? v.map((it) => formatClassName((it as any)?.__className)).join(', ')
+      ? v.map((it) => {
+          const info = itemLabel((it as any)?.__className)
+          return info.zh ?? info.fallback
+        }).join(', ')
       : ''
     return `list[${len}${classes ? ': ' + classes : ''}]`
   }
