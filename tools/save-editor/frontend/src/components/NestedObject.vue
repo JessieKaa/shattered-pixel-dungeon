@@ -1,6 +1,9 @@
 <template>
   <div class="nested-dict">
     <div v-if="allKeys.length === 0" class="empty-hint">(空 dict)</div>
+    <div v-else-if="isSearching && leafKeys.length === 0 && nestedEntries.length === 0" class="empty-hint">
+      未找到匹配字段
+    </div>
 
     <!-- 叶子字段(bool/int/float/str/null/unknown + 只读 __className)-->
     <FieldRow
@@ -30,6 +33,7 @@
           v-if="inferType(v) === 'dict'"
           :value="local[k]"
           :field-path="childPath(k)"
+          :search-query="childSearchQuery(k, v)"
           @update="(newVal) => onChildUpdate(k, newVal)"
         />
         <NestedList
@@ -37,6 +41,7 @@
           :value="v as unknown[]"
           :field-key="k"
           :field-path="childPath(k)"
+          :search-query="childSearchQuery(k, v)"
           @update="(newVal) => onChildUpdate(k, newVal)"
         />
       </el-collapse-item>
@@ -57,11 +62,19 @@ import NestedList from './NestedList.vue'
 import AddFieldDialog from './AddFieldDialog.vue'
 import { inferType } from '@/composables/useFieldType'
 import { itemLabel } from '@/composables/useItemLabel'
+import {
+  fieldSearchParts,
+  matchesQuery,
+  normalizeSearchText,
+  objectMatchesQuery,
+  summarySearchText,
+} from '@/composables/useFormSearch'
 import type { FieldType } from '@/types'
 
 const props = defineProps<{
   value: unknown
   fieldPath?: string
+  searchQuery?: string
 }>()
 const emit = defineEmits<{
   (e: 'update', newVal: Record<string, unknown>): void
@@ -87,12 +100,36 @@ function childPath(k: string): string {
 }
 
 const allKeys = computed(() => Object.keys(local.value))
+const searchQuery = computed(() => props.searchQuery ?? '')
+const isSearching = computed(() => normalizeSearchText(searchQuery.value).length > 0)
+
+function leafMatches(k: string): boolean {
+  const value = local.value[k]
+  return matchesQuery(searchQuery.value, ...fieldSearchParts(childPath(k), k, value), value)
+}
+
+function nestedSelfMatches(k: string, value: unknown): boolean {
+  return matchesQuery(
+    searchQuery.value,
+    ...fieldSearchParts(childPath(k), k, value),
+    summarySearchText(value)
+  )
+}
+
+function nestedEntryMatches(k: string, value: unknown): boolean {
+  return nestedSelfMatches(k, value) || objectMatchesQuery(value, searchQuery.value, childPath(k))
+}
+
+function childSearchQuery(k: string, value: unknown): string {
+  return isSearching.value && nestedSelfMatches(k, value) ? '' : searchQuery.value
+}
 
 const leafKeys = computed(() => {
   return allKeys.value
     .filter((k) => {
       const t = inferType(local.value[k])
-      return t !== 'dict' && t !== 'list'
+      if (t === 'dict' || t === 'list') return false
+      return !isSearching.value || leafMatches(k)
     })
     .sort((a, b) => {
       if (a === '__className') return -1
@@ -104,13 +141,20 @@ const leafKeys = computed(() => {
 const nestedEntries = computed(() => {
   const entries: [string, unknown][] = []
   for (const k of allKeys.value) {
-    const t = inferType(local.value[k])
-    if (t === 'dict' || t === 'list') entries.push([k, local.value[k]])
+    const v = local.value[k]
+    const t = inferType(v)
+    if ((t === 'dict' || t === 'list') && (!isSearching.value || nestedEntryMatches(k, v))) {
+      entries.push([k, v])
+    }
   }
   return entries.sort((a, b) => a[0].localeCompare(b[0]))
 })
 
 const activeNested = ref<string[]>([])
+
+watch([nestedEntries, isSearching], () => {
+  if (isSearching.value) activeNested.value = nestedEntries.value.map(([k]) => k)
+})
 
 function summary(v: unknown): string {
   const t = inferType(v)

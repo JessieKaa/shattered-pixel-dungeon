@@ -1,8 +1,37 @@
 <template>
   <div class="nested-list">
     <div v-if="!value || value.length === 0" class="empty-hint">(空 list)</div>
+    <div v-else-if="isSearching && visibleItems.length === 0" class="empty-hint">未找到匹配物品</div>
+
+    <template v-if="isSearching">
+      <el-card v-for="{ item, index } in visibleItems" :key="localKeys[index]" class="item-card" shadow="hover">
+        <div class="item-row">
+          <span class="drag-handle disabled" title="搜索时不可拖拽排序">⋮⋮</span>
+          <strong class="item-title">
+            #{{ index }} · <ItemLabel :class-name="(item as any)?.__className" />
+          </strong>
+          <el-popconfirm
+            title="确认删除该项?"
+            @confirm="onDelete(index)"
+            width="200"
+          >
+            <template #reference>
+              <el-button type="danger" size="small" link>删除</el-button>
+            </template>
+          </el-popconfirm>
+        </div>
+
+        <NestedObject
+          :value="item"
+          :field-path="itemPath(index)"
+          :search-query="itemSelfMatches(item) ? '' : searchQuery"
+          @update="(newItem) => onItemFieldUpdate(index, newItem)"
+        />
+      </el-card>
+    </template>
+
     <draggable
-      v-else
+      v-else-if="value && value.length > 0"
       :list="localItems"
       :item-key="getItemKey"
       :handle="'.drag-handle'"
@@ -29,6 +58,7 @@
           <NestedObject
             :value="element"
             :field-path="itemPath(index)"
+            :search-query="searchQuery"
             @update="(newItem) => onItemFieldUpdate(index, newItem)"
           />
         </el-card>
@@ -40,16 +70,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import draggable from 'vuedraggable'
 import NestedObject from './NestedObject.vue'
 import AddItemDialog from './AddItemDialog.vue'
 import ItemLabel from './ItemLabel.vue'
+import {
+  itemSearchParts,
+  listItemMatchesQuery,
+  matchesQuery,
+  normalizeSearchText,
+} from '@/composables/useFormSearch'
 
 const props = defineProps<{
   value: unknown[]
   fieldKey?: string
   fieldPath?: string
+  searchQuery?: string
 }>()
 
 const emit = defineEmits<{
@@ -59,6 +96,17 @@ const emit = defineEmits<{
 // localItems 直接保存 item 本身(不包装)。stable UI key 在 parallel 数组里维护。
 const localItems = ref<unknown[]>([])
 const localKeys = ref<string[]>([])
+const searchQuery = computed(() => props.searchQuery ?? '')
+const isSearching = computed(() => normalizeSearchText(searchQuery.value).length > 0)
+const visibleItems = computed(() => {
+  return localItems.value
+    .map((item, index) => ({ item, index }))
+    .filter(({ item, index }) => !isSearching.value || listItemMatchesQuery(item, searchQuery.value, itemPath(index)))
+})
+
+function itemSelfMatches(item: unknown): boolean {
+  return matchesQuery(searchQuery.value, ...itemSearchParts((item as Record<string, unknown> | null)?.__className))
+}
 
 function makeId(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -129,6 +177,11 @@ function onItemFieldUpdate(index: number, newItem: Record<string, unknown>) {
 }
 .item-title {
   flex: 1;
+}
+
+.drag-handle.disabled {
+  color: var(--el-text-color-secondary);
+  cursor: not-allowed;
 }
 
 @media (max-width: 768px) {
