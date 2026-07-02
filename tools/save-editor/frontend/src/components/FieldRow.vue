@@ -1,6 +1,8 @@
 <template>
   <div class="field-row">
-    <label :class="{ 'readonly-label': isCN }" :title="hint">{{ keyName }}</label>
+    <label :class="{ 'readonly-label': isCN }" :title="hint">
+      <FieldLabel :path="labelPath" :key-name="keyName" />
+    </label>
 
     <el-input
       v-if="isCN"
@@ -78,10 +80,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { inferType } from '@/composables/useFieldType'
+import FieldLabel from './FieldLabel.vue'
 
 const props = defineProps<{
   keyName: string
   value: unknown
+  fieldPath?: string
 }>()
 
 const emit = defineEmits<{
@@ -91,6 +95,7 @@ const emit = defineEmits<{
 
 const type = computed(() => inferType(props.value))
 const isCN = computed(() => props.keyName === '__className')
+const labelPath = computed(() => props.fieldPath?.trim() || props.keyName)
 const hint = computed(
   () => `(${type.value})${isCN.value ? ' · class identifier (read-only)' : ''}`
 )
@@ -119,13 +124,8 @@ function onText(v: string) {
 label {
   min-width: 220px;
   font-weight: 500;
-}
-
-label.readonly-label::after {
-  content: ' (只读)';
-  color: var(--el-text-color-secondary);
-  font-weight: normal;
-  font-size: 0.85em;
+  display: flex;
+  align-items: center;
 }
 
 .value-input {

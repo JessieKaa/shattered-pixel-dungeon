@@ -7,6 +7,7 @@
       v-for="k in leafKeys"
       :key="k"
       :key-name="k"
+      :field-path="childPath(k)"
       :value="local[k]"
       @update="(_key, val) => onLeafUpdate(k, val)"
       @delete="() => onLeafDelete(k)"
@@ -17,18 +18,25 @@
       <el-collapse-item
         v-for="[k, v] in nestedEntries"
         :key="k"
-        :title="`${k} (${summary(v)})`"
         :name="k"
       >
+        <template #title>
+          <span class="nested-title">
+            <FieldLabel :path="childPath(k)" :key-name="k" />
+            <span class="nested-summary">({{ summary(v) }})</span>
+          </span>
+        </template>
         <NestedObject
           v-if="inferType(v) === 'dict'"
           :value="local[k]"
+          :field-path="childPath(k)"
           @update="(newVal) => onChildUpdate(k, newVal)"
         />
         <NestedList
           v-else-if="inferType(v) === 'list'"
           :value="v as unknown[]"
           :field-key="k"
+          :field-path="childPath(k)"
           @update="(newVal) => onChildUpdate(k, newVal)"
         />
       </el-collapse-item>
@@ -44,12 +52,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import FieldRow from './FieldRow.vue'
+import FieldLabel from './FieldLabel.vue'
 import NestedList from './NestedList.vue'
 import AddFieldDialog from './AddFieldDialog.vue'
 import { inferType, formatClassName } from '@/composables/useFieldType'
 import type { FieldType } from '@/types'
 
-const props = defineProps<{ value: unknown }>()
+const props = defineProps<{
+  value: unknown
+  fieldPath?: string
+}>()
 const emit = defineEmits<{
   (e: 'update', newVal: Record<string, unknown>): void
 }>()
@@ -67,6 +79,11 @@ watch(
   },
   { immediate: true, deep: true }
 )
+
+function childPath(k: string): string {
+  const p = props.fieldPath?.trim()
+  return p ? `${p}.${k}` : k
+}
 
 const allKeys = computed(() => Object.keys(local.value))
 
@@ -163,5 +180,17 @@ function defaultValue(type: FieldType): unknown {
 .nested-dict {
   margin: 4px 0;
   padding-left: 8px;
+}
+
+.nested-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nested-summary {
+  color: var(--el-text-color-secondary);
+  font-weight: normal;
+  font-size: 0.9em;
 }
 </style>

@@ -28,6 +28,7 @@
 
           <NestedObject
             :value="element"
+            :field-path="itemPath(index)"
             @update="(newItem) => onItemFieldUpdate(index, newItem)"
           />
         </el-card>
@@ -48,6 +49,7 @@ import { formatClassName } from '@/composables/useFieldType'
 const props = defineProps<{
   value: unknown[]
   fieldKey?: string
+  fieldPath?: string
 }>()
 
 const emit = defineEmits<{
@@ -63,6 +65,11 @@ function makeId(): string {
     return crypto.randomUUID()
   }
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
+function itemPath(index: number): string {
+  const p = props.fieldPath?.trim()
+  return p ? `${p}[${index}]` : `[${index}]`
 }
 
 watch(
