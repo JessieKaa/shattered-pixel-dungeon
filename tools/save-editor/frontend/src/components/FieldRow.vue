@@ -1,6 +1,15 @@
 <template>
   <div class="field-row">
-    <label :class="{ 'readonly-label': isCN }" :title="hint">{{ keyName }}</label>
+    <label :class="{ 'readonly-label': isCN }" :title="hint">
+      <el-tooltip v-if="labelInfo" placement="top" effect="dark">
+        <template #content>
+          <div style="font-weight: 600">{{ labelInfo.zh }}</div>
+          <div v-if="labelInfo.desc" style="font-size: 12px; opacity: 0.85; margin-top: 4px">{{ labelInfo.desc }}</div>
+        </template>
+        <span class="label-text">{{ labelInfo.zh }}<span class="raw-key">({{ keyName }})</span></span>
+      </el-tooltip>
+      <span v-else class="label-text">{{ keyName }}</span>
+    </label>
 
     <el-input
       v-if="isCN"
@@ -78,6 +87,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { inferType } from '@/composables/useFieldType'
+import { getFieldLabel } from '@/composables/useFieldLabels'
 
 const props = defineProps<{
   keyName: string
@@ -91,6 +101,7 @@ const emit = defineEmits<{
 
 const type = computed(() => inferType(props.value))
 const isCN = computed(() => props.keyName === '__className')
+const labelInfo = computed(() => getFieldLabel(props.keyName))
 const hint = computed(
   () => `(${type.value})${isCN.value ? ' · class identifier (read-only)' : ''}`
 )
@@ -119,13 +130,31 @@ function onText(v: string) {
 label {
   min-width: 220px;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+}
+
+.label-text {
+  display: inline-flex;
+  align-items: center;
+}
+
+.raw-key {
+  color: var(--el-text-color-secondary);
+  font-size: 0.85em;
+  margin-left: 4px;
+  font-weight: normal;
+}
+
+label.readonly-label .raw-key::after {
+  content: ' · 只读';
+  color: var(--el-text-color-secondary);
+  font-size: 0.9em;
+  margin-left: 4px;
 }
 
 label.readonly-label::after {
-  content: ' (只读)';
-  color: var(--el-text-color-secondary);
-  font-weight: normal;
-  font-size: 0.85em;
+  content: '';
 }
 
 .value-input {
