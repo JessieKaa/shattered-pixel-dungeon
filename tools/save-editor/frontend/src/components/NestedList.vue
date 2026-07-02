@@ -130,4 +130,18 @@ function onItemFieldUpdate(index: number, newItem: Record<string, unknown>) {
 .item-title {
   flex: 1;
 }
+
+@media (max-width: 768px) {
+  .item-card {
+    margin: 4px 0;
+  }
+  .item-row {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .item-title {
+    flex: 1 1 100%;
+    font-size: 0.9em;
+  }
+}
 </style>

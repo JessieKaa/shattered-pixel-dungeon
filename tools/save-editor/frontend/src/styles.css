@@ -67,3 +67,36 @@ body {
   font-style: italic;
   padding: 8px 0;
 }
+
+/* 移动端响应式(≤768px) */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 8px 8px 32px;
+  }
+  .app-header {
+    margin-bottom: 8px;
+  }
+  .app-header h1 {
+    font-size: 1.2rem;
+  }
+  .app-header .subtle {
+    font-size: 0.75rem;
+  }
+  .section-card {
+    margin: 8px 0;
+  }
+
+  /* 三层 el-tabs 全部横向滚动(App.vue / FormSchemaEditor.vue / RawJsonEditor.vue)
+     EP 内部 DOM 必须全局选,scoped 选不到 */
+  .el-tabs__nav-wrap,
+  .el-tabs__nav-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .el-tabs__nav {
+    white-space: nowrap;
+  }
+  .el-tabs__nav-wrap::after {
+    display: none;
+  }
+}

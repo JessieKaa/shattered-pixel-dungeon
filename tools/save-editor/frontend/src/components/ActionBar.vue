@@ -114,4 +114,16 @@ function onReset() {
 .spacer {
   flex: 1;
 }
+
+@media (max-width: 768px) {
+  .action-bar {
+    gap: 8px;
+  }
+  .action-bar .hint {
+    display: none;
+  }
+  .action-bar .spacer {
+    display: none;
+  }
+}
 </style>

@@ -6,7 +6,7 @@
 
     <el-collapse v-model="activeGroups">
       <el-collapse-item title="meta(5 字段)" name="meta">
-        <el-form label-width="160px">
+        <el-form :label-width="labelWidth" :label-position="labelPosition">
           <el-form-item label="meta.name">
             <template #label>
               <FieldLabel path="meta.name" />
@@ -66,7 +66,7 @@
       </el-collapse-item>
 
       <el-collapse-item title="game.hero(6 字段)" name="hero">
-        <el-form label-width="160px">
+        <el-form :label-width="labelWidth" :label-position="labelPosition">
           <el-form-item label="hero.HP">
             <template #label>
               <FieldLabel path="hero.HP" />
@@ -137,7 +137,7 @@
       </el-collapse-item>
 
       <el-collapse-item title="game 顶层(4 字段)" name="game">
-        <el-form label-width="160px">
+        <el-form :label-width="labelWidth" :label-position="labelPosition">
           <el-form-item label="game.gold">
             <template #label>
               <FieldLabel path="game.gold" />
@@ -189,14 +189,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useBundleStore } from '@/stores/bundle'
 import { useHistoryStore } from '@/stores/history'
 import { HERO_CLASSES } from '@/types'
 import FieldLabel from './FieldLabel.vue'
+import { useMobileBreakpoint } from '@/composables/useMobileBreakpoint'
 
 const bundleStore = useBundleStore()
 const historyStore = useHistoryStore()
+
+const { isMobile } = useMobileBreakpoint()
+const labelPosition = computed<'top' | 'right'>(() =>
+  isMobile.value ? 'top' : 'right'
+)
+const labelWidth = computed(() => (isMobile.value ? 'auto' : '160px'))
 
 const activeGroups = ref(['meta', 'hero', 'game'])
 

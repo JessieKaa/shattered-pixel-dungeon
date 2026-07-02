@@ -3,7 +3,7 @@
     <template #header>
       <span>存档信息</span>
     </template>
-    <el-descriptions :column="3" border>
+    <el-descriptions :column="descColumn" border>
       <el-descriptions-item label="meta.name">
         {{ bundleStore.meta?.name ?? '-' }}
       </el-descriptions-item>
@@ -39,6 +39,11 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useBundleStore } from '@/stores/bundle'
+import { useMobileBreakpoint } from '@/composables/useMobileBreakpoint'
+
 const bundleStore = useBundleStore()
+const { isMobile } = useMobileBreakpoint()
+const descColumn = computed(() => (isMobile.value ? 1 : 3))
 </script>
