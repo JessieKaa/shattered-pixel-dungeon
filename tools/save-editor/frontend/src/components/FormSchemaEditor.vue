@@ -7,7 +7,7 @@
     <el-tabs v-model="active">
       <el-tab-pane label="护甲 (hero.armor)" name="armor">
         <template v-if="hasArmor">
-          <NestedObject :value="armor" @update="onArmorUpdate" />
+          <NestedObject :value="armor" field-path="hero.armor" @update="onArmorUpdate" />
         </template>
         <template v-else>
           <el-empty description="未装备护甲" :image-size="60">
@@ -20,7 +20,7 @@
 
       <el-tab-pane label="武器 (hero.weapon)" name="weapon">
         <template v-if="hasWeapon">
-          <NestedObject :value="weapon" @update="onWeaponUpdate" />
+          <NestedObject :value="weapon" field-path="hero.weapon" @update="onWeaponUpdate" />
         </template>
         <template v-else>
           <el-empty description="未装备武器" :image-size="60">
@@ -35,6 +35,7 @@
         <NestedList
           :value="inventory"
           field-key="inventory"
+          field-path="hero.inventory"
           @update="onInventoryUpdate"
         />
       </el-tab-pane>

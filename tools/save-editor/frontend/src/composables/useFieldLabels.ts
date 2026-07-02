@@ -48,12 +48,14 @@ export const FIELD_LABELS: Record<string, FieldLabel> = {
   // Meta / Game
   name: { zh: '存档名', desc: '槽位显示名称' },
   depth: { zh: '深度', desc: '当前地下城层数' },
+  'meta.level': { zh: '等级', desc: '存档记录的英雄等级' },
   hero_class: { zh: '职业', desc: '英雄职业' },
   version: { zh: '版本', desc: '存档创建时的游戏版本号,必须匹配 896' },
   gold: { zh: '金币', desc: '持有金币数' },
   seed: { zh: '种子', desc: '随机种子,改后可能让世界状态不一致' },
   challenges: { zh: '挑战', desc: '开启的挑战模式位掩码' },
   duration: { zh: '时长', desc: '游戏时长(回合)' },
+  'game.daily': { zh: '每日挑战', desc: 'true 会触发 SaveSlotService.isSaveAllowed 拒绝存读档' },
 
   // 嵌套路径特殊
   'weapon.wand': { zh: '内嵌法杖', desc: '法师杖内嵌的法杖' },
@@ -61,20 +63,23 @@ export const FIELD_LABELS: Record<string, FieldLabel> = {
 
 /**
  * 获取字段中文标签与描述。
- * 支持完整路径精确匹配(如 weapon.wand)和最后一段字段名匹配(如 level)。
+ * 支持完整路径精确匹配(如 hero.weapon.wand)和路径后缀匹配:
+ *   - 完整路径: hero.weapon.wand
+ *   - 后 2 段: weapon.wand
+ *   - 后 1 段(字段名): wand
  * 未命中时返回 null,调用方应保持原 key 显示。
  */
 export function getFieldLabel(path: string): FieldLabel | null {
   if (!path) return null
 
   // 1. 完整路径精确匹配
-  const exact = FIELD_LABELS[path]
-  if (exact) return exact
+  if (FIELD_LABELS[path]) return FIELD_LABELS[path]
 
-  // 2. 取最后一段(字段名)匹配
-  const tail = path.split('.').pop() ?? ''
-  if (tail && tail !== path) {
-    return FIELD_LABELS[tail] ?? null
+  // 2. 从最长后缀开始尝试(weapon.wand → wand)
+  const segments = path.split('.')
+  for (let i = 1; i < segments.length; i++) {
+    const suffix = segments.slice(i).join('.')
+    if (FIELD_LABELS[suffix]) return FIELD_LABELS[suffix]
   }
 
   return null

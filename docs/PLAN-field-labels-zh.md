@@ -30,18 +30,21 @@ tools/save-editor/frontend/src/
 ├── composables/
 │   └── useFieldLabels.ts        ★新增字段名 → 中文/描述 字典
 ├── components/
-│   ├── FieldRow.vue             [改] label + tooltip
+│   ├── FieldRow.vue             [改] label + tooltip + fieldPath prop
+│   ├── FieldLabel.vue           ★新增可复用 label tooltip 组件
 │   ├── NumericFields.vue        [改] el-form-item label + tooltip
-│   └── NestedObject.vue         [改] 可选:__className 类名 tooltip
+│   └── NestedObject.vue         [改] 向下透传 fieldPath
 ```
 
 ### 匹配策略
 
 字段名可能带路径(如 `hero.armor.level` 或 `weapon.wand`)。匹配优先级:
 
-1. **完整路径精确匹配**(`weapon.wand` / `inventory` 等少数)
+1. **完整路径精确匹配**(`weapon.wand` / `hero.armor.level` / `inventory` 等少数)
 2. **字段名(最后一段)匹配**(`level` / `quantity` / `cursed` 等通用字段)
 3. **未命中**:显示原字段名,无 tooltip
+
+完整路径仅由 `NestedObject` / `NestedList` 向下透传展示用 `fieldPath` prop 实现,**数据层 update/delete 仍只使用原始 `keyName`**。
 
 函数签名:
 
@@ -103,13 +106,14 @@ export const FIELD_LABELS: Record<string, FieldLabel> = {
   // Meta / Game
   name:       { zh: '存档名', desc: '槽位显示名称' },
   depth:      { zh: '深度', desc: '当前地下城层数' },
-  level:      { zh: '等级', desc: '存档记录的英雄等级' },
+  'meta.level': { zh: '等级', desc: '存档记录的英雄等级' },
   hero_class: { zh: '职业', desc: '英雄职业' },
   version:    { zh: '版本', desc: '存档创建时的游戏版本号,必须匹配 896' },
   gold:       { zh: '金币', desc: '持有金币数' },
   seed:       { zh: '种子', desc: '随机种子,改后可能让世界状态不一致' },
   challenges: { zh: '挑战', desc: '开启的挑战模式位掩码' },
   duration:   { zh: '时长', desc: '游戏时长(回合)' },
+  'game.daily': { zh: '每日挑战', desc: 'true 会触发 SaveSlotService.isSaveAllowed 拒绝存读档' },
 
   // 嵌套路径特殊
   'weapon.wand': { zh: '内嵌法杖', desc: '法师杖内嵌的法杖' },
@@ -128,6 +132,7 @@ export const FIELD_LABELS: Record<string, FieldLabel> = {
 
 ### 改 `tools/save-editor/frontend/src/components/FieldRow.vue`
 
+- 新增展示用 `fieldPath` prop(默认 `keyName`),不影响 `update/delete` 事件
 - 引入 `getFieldLabel`
 - label 改为:
   - 有中文:显示 `中文名(原始 key)`
@@ -135,30 +140,39 @@ export const FIELD_LABELS: Record<string, FieldLabel> = {
   - 鼠标悬停 `el-tooltip` 显示描述
 - 保持现有控件和布局不变
 
+### 新增 `tools/save-editor/frontend/src/components/FieldLabel.vue`
+
+- 封装 label + tooltip 展示逻辑,供 `FieldRow.vue` 和 `NumericFields.vue` 复用
+
 ### 改 `tools/save-editor/frontend/src/components/NumericFields.vue`
 
-- 引入 `getFieldLabel`
+- 引入 `FieldLabel` 组件
 - 每个 `el-form-item` 的 `label` 属性仍传原 key(用于表单校验/调试)
-- 在 `label` 插槽里显示中文名,tooltip 显示描述
+- 用 `#label` 插槽覆盖显示,覆盖当前 15 个字段
 - 代码变动小,保持现有结构
 
-### 可选:改 `tools/save-editor/frontend/src/components/NestedObject.vue`
+### 改 `tools/save-editor/frontend/src/components/NestedObject.vue`
 
-- `__className` 值显示类简称,鼠标悬停显示完整类名
-- 可选加"中文类名"(如 `ClothArmor` → `布甲`),但类名太多,建议只做通用几个或只做完整类名 tooltip
-- **本 PR 不强制要求,可在 Step 5 作为 nice-to-have**
+- 新增展示用 `fieldPath` prop
+- 向 `FieldRow` 传 `fieldPath`
+- 递归调用 `NestedObject` / `NestedList` 时拼接 `fieldPath`
+- **只影响展示,数据 update/delete 仍用原始 `keyName`**
 
 ## Steps
 
 ### Step 1: 字段字典
 
-- 创建 `frontend/src/composables/useFieldLabels.ts`
-- 实现 `getFieldLabel`,支持路径最后一段匹配
-- 写 40 个核心字段条目(从 Context 里列出的真实存档字段出发)
+- 创建 `tools/save-editor/frontend/src/composables/useFieldLabels.ts`
+- 实现 `getFieldLabel`,支持完整路径精确匹配和路径最后一段匹配
+- 写 40+ 个核心字段条目(从 Context 里列出的真实存档字段出发)
+- 注意:真实路径键(如 `meta.level`、`game.daily`、`weapon.wand`)与通用字段名(如 `level`)共存,完整路径优先命中
 
 ### Step 2: FieldRow 中文标签
 
-- 改 `FieldRow.vue`:
+- 改 `tools/save-editor/frontend/src/components/FieldRow.vue`:
+  - 新增展示用 `fieldPath` prop,默认等于 `keyName`
+  - `labelInfo = getFieldLabel(props.fieldPath)`
+  - 保持 `emit('update', keyName, value)` 和 `emit('delete', keyName)` 不变
   ```vue
   <el-tooltip v-if="labelInfo" placement="top">
     <template #content>
@@ -172,41 +186,47 @@ export const FIELD_LABELS: Record<string, FieldLabel> = {
 - 加 CSS `.raw-key { color: var(--el-text-color-secondary); font-size: 0.85em; margin-left: 4px; }`
 - 保持 `min-width: 220px`
 
-### Step 3: NumericFields 中文标签
+### Step 3: 新增 `FieldLabel.vue` 组件
 
-- 改 `NumericFields.vue`:
+- 抽离 label + tooltip 模板,供 `FieldRow` 和 `NumericFields` 复用
+- props: `path: string`, `keyName?: string`
+- 未命中字典时回退显示 `path` 或 `keyName`
+
+### Step 4: NumericFields 中文标签
+
+- 改 `tools/save-editor/frontend/src/components/NumericFields.vue`:
+  - 引入 `FieldLabel` 组件
   - 每个 `el-form-item` 的 `label` 仍用原 key
   - 用 `#label` 插槽覆盖显示:
     ```vue
     <template #label>
-      <el-tooltip v-if="getFieldLabel('meta.name')" placement="top">
-        <template #content>{{ getFieldLabel('meta.name')?.desc }}</template>
-        <span>存档名<span class="raw-key">(meta.name)</span></span>
-      </el-tooltip>
+      <FieldLabel path="meta.name" />
     </template>
     ```
-- 为简化,写一个小函数 `labeled(key, fallback)` 返回插槽内容
-- 覆盖 12 个字段
+- 覆盖当前 15 个字段,包括 `game.daily`
 
-### Step 4: 构建 + 手测
+### Step 5: NestedObject 向下透传 fieldPath
 
-- `cd frontend && npm run build` 通过
+- 改 `tools/save-editor/frontend/src/components/NestedObject.vue`:
+  - 新增 `fieldPath` prop(默认 `''`)
+  - 叶子字段渲染 `<FieldRow :field-path="fieldPath ? `${fieldPath}.${k}` : k" ... />`
+  - 嵌套 dict/list 递归时传 `:field-path="fieldPath ? `${fieldPath}.${k}` : k`"
+- 同步改 `NestedList.vue` 向每个 item 传 `fieldPath`
+
+### Step 6: 构建 + 手测
+
+- `cd tools/save-editor/frontend && npm run build` 通过
 - 启动 prod Flask,打开 SPA,上传 `/tmp/123.zip`
 - 检查:
   - `level` 显示"等级(level)"
   - `quantity` 显示"数量(quantity)"
   - `cursed` 显示"诅咒(cursed)"
   - `__className` 显示"类名(__className)"
+  - `weapon.wand` 显示"内嵌法杖(wand)"
   - 鼠标悬停有 tooltip 描述
   - 无字典字段(如 `kept_lost`)正常显示原 key,不崩
 
-### Step 5(可选): 类名 tooltip
-
-- 在 `NestedObject.vue` 的 item title 处,给 `__className` 值加 tooltip 显示完整类名
-- 不做中文类名映射(类名太多)
-- 如果工期紧,跳过
-
-### Step 6: 验证
+### Step 7: 验证
 
 - pytest 40/40 全绿(后端不变)
 - Java 闭环通过(数据格式不变)
@@ -217,24 +237,26 @@ export const FIELD_LABELS: Record<string, FieldLabel> = {
 
 | # | 验收点 | 验证方法 |
 |---|---|---|
-| 1 | 40 个核心字段字典落到 `useFieldLabels.ts` | 文件检查 |
+| 1 | 40+ 个核心字段字典落到 `useFieldLabels.ts` | 文件检查 |
 | 2 | `FieldRow.vue` 显示中文名+原 key,未命中字段显示原 key | 手测 |
 | 3 | `FieldRow.vue` 鼠标悬停显示描述 tooltip | 手测 |
-| 4 | `NumericFields.vue` 12 个字段显示中文名 | 手测 |
+| 4 | `NumericFields.vue` 15 个字段显示中文名 | 手测 |
 | 5 | `__className` 显示"类名(__className)" + 只读提示 | 手测 |
-| 6 | 无字典字段(如不常见子类字段)正常显示,不崩 | 手测 |
-| 7 | 表单 Schema + Raw JSON 切换后标签仍正确 | 手测 |
-| 8 | `npm run build` 通过,dist 大小增长 < 50KB(字典很小) | `npm run build` |
-| 9 | pytest 40/40 不回归 | `pytest -q` |
-| 10 | Java 闭环通过(SPD 数据格式不变) | `SPD_ZIP_PATH=/tmp/... ./gradlew :core:test --tests '*SaveSlotIOPythonZipTest'` |
+| 6 | 完整路径特殊项(如 `weapon.wand`)正确显示中文 | 手测 |
+| 7 | 无字典字段(如不常见子类字段)正常显示,不崩 | 手测 |
+| 8 | 表单 Schema + Raw JSON 切换后标签仍正确 | 手测 |
+| 9 | `npm run build` 通过,dist 大小增长 < 50KB(字典很小) | `npm run build` |
+| 10 | pytest 40/40 不回归 | `pytest -q` |
+| 11 | Java 闭环通过(SPD 数据格式不变) | `SPD_ZIP_PATH=/tmp/... ./gradlew :core:test --tests '*SaveSlotIOPythonZipTest'` |
 
 ## 风险与备选
 
-- **字段名歧义**:同一个 key 在不同上下文含义不同(如 `level` 在装备是等级、在法杖也是等级、在英雄也是等级)。字典按字段名匹配,恰好这些含义一致,无需路径级歧义处理
-- **类名太多**:只做通用字段,不做类名中文映射,避免维护爆炸
-- **上游新增字段**:字典未覆盖时自动回退英文,不崩,后续再补
-- **tooltip 覆盖密集**:问题不大,Element Plus tooltip 交互标准
-- **label 宽度变宽**:中文名+原 key 可能超过 220px,测试后如果截断,适当调宽或把原 key 缩小字号
+- **字段名歧义**:同一个 key 在不同上下文含义不同(如 `level` 在装备是等级、在法杖也是等级)。字典通过完整路径(如 `meta.level`)和字段名匹配,避免 meta 等级与物品等级混淆。
+- **完整路径实现依赖 `fieldPath` prop**:必须确保 `NestedObject` / `NestedList` 只把 `fieldPath` 当展示用,`update/delete` 事件仍传原始 `keyName`,避免污染 bundle 数据格式。
+- **类名太多**:只做通用字段,不做类名中文映射,避免维护爆炸。
+- **上游新增字段**:字典未覆盖时自动回退英文,不崩,后续再补。
+- **tooltip 覆盖密集**:问题不大,Element Plus tooltip 交互标准。
+- **label 宽度变宽**:中文名+原 key 可能超过 220px,测试后如果截断,适当调宽或把原 key 缩小字号。
 
 ## Out of scope
 
