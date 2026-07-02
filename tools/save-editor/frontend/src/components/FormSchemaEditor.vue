@@ -4,10 +4,26 @@
       <span>表单 Schema 编辑器(armor / weapon / inventory)</span>
     </template>
 
+    <div class="form-search-bar">
+      <el-input
+        v-model="searchQuery"
+        clearable
+        placeholder="搜索字段 / item（支持中文、英文、class 名）"
+      />
+      <div v-if="searchQuery.trim()" class="search-hint">
+        正在过滤: {{ searchQuery.trim() }}
+      </div>
+    </div>
+
     <el-tabs v-model="active">
       <el-tab-pane label="护甲 (hero.armor)" name="armor">
         <template v-if="hasArmor">
-          <NestedObject :value="armor" field-path="hero.armor" @update="onArmorUpdate" />
+          <NestedObject
+            :value="armor"
+            field-path="hero.armor"
+            :search-query="searchQuery"
+            @update="onArmorUpdate"
+          />
         </template>
         <template v-else>
           <el-empty description="未装备护甲" :image-size="60">
@@ -20,7 +36,12 @@
 
       <el-tab-pane label="武器 (hero.weapon)" name="weapon">
         <template v-if="hasWeapon">
-          <NestedObject :value="weapon" field-path="hero.weapon" @update="onWeaponUpdate" />
+          <NestedObject
+            :value="weapon"
+            field-path="hero.weapon"
+            :search-query="searchQuery"
+            @update="onWeaponUpdate"
+          />
         </template>
         <template v-else>
           <el-empty description="未装备武器" :image-size="60">
@@ -36,6 +57,7 @@
           :value="inventory"
           field-key="inventory"
           field-path="hero.inventory"
+          :search-query="searchQuery"
           @update="onInventoryUpdate"
         />
       </el-tab-pane>
@@ -54,6 +76,7 @@ import { ITEM_TEMPLATES } from '@/composables/itemTemplates'
 const bundleStore = useBundleStore()
 const historyStore = useHistoryStore()
 const active = ref<'armor' | 'weapon' | 'inventory'>('armor')
+const searchQuery = ref('')
 
 const armor = computed(() => bundleStore.hero?.armor ?? null)
 const weapon = computed(() => bundleStore.hero?.weapon ?? null)
@@ -94,3 +117,15 @@ function onCreateWeapon() {
   bundleStore.setHeroField('weapon', ITEM_TEMPLATES.Dagger() as any)
 }
 </script>
+
+<style scoped>
+.form-search-bar {
+  margin-bottom: 12px;
+}
+
+.search-hint {
+  margin-top: 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 0.85em;
+}
+</style>
