@@ -34,6 +34,7 @@ public class LuaEngine implements ResourceFinder {
 	static final String MOBS_DIR = "scripts/mobs";
 	static final String ALLIES_DIR = "scripts/allies";
 	static final String HEROES_DIR = "scripts/heroes";
+	static final String SPELLS_DIR = "scripts/spells";
 
 	private static LuaEngine instance;
 
@@ -78,6 +79,9 @@ public class LuaEngine implements ResourceFinder {
 			// classes. The Java-side LuaHeroClass captures the metadata; hero.heroClass stays
 			// equal to talentSource (host) and lua_class_id is the sidecar marker (D3).
 			globals.set("register_hero", new RegisterHeroFunction());
+			// M3d: register_spell global, mirroring register_item for Lua-defined consumable
+			// spells (LuaSpell extends Item — detach-on-use + onUse(heroId) callback).
+			globals.set("register_spell", new RegisterSpellFunction());
 			// M2: inject the narrow RPD.* surface (affectBuff/damageChar/GLog/...).
 			// Lua never gets a Char object — only int ids resolved via Actor.findById.
 			globals.set("RPD", RpdApi.build());
@@ -101,6 +105,9 @@ public class LuaEngine implements ResourceFinder {
 
 			// M3c: same host-side enumeration for hero scripts under scripts/heroes/.
 			loadHeroScripts();
+
+			// M3d: same host-side enumeration for spell scripts under scripts/spells/.
+			loadSpellScripts();
 
 			initialized = true;
 		} catch (Exception e) {
@@ -154,6 +161,17 @@ public class LuaEngine implements ResourceFinder {
 	 */
 	private void loadHeroScripts() {
 		loadScriptsFrom(HEROES_DIR, "Lua heroes", LuaHeroRegistry::size);
+	}
+
+	/**
+	 * M3d: enumerate {@code scripts/spells/*.lua} and compile each. Same host-side
+	 * enumeration + two-stage listing as items/mobs/allies/heroes (dofile is
+	 * stripped from the sandbox). LuaSpell is not part of the vanilla loot pool
+	 * — scripts only define consumable behaviour; spawning them into inventory is
+	 * left to mod/cheat console or future milestones.
+	 */
+	private void loadSpellScripts() {
+		loadScriptsFrom(SPELLS_DIR, "Lua spells", LuaSpellRegistry::size);
 	}
 
 	/**
@@ -271,6 +289,34 @@ public class LuaEngine implements ResourceFinder {
 				LuaItemRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_item rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_spell(table)} global handed to Lua (M3d). Mirrors
+	 * {@link RegisterItemFunction}: validates required fields ({@code id/name})
+	 * and skips on bad input. {@code image} is optional (defaults to 0); the
+	 * {@code onUse} callback field is a plain table entry validated lazily by
+	 * {@link LuaItemCallbacks}.
+	 */
+	private static class RegisterSpellFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_spell: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				tbl.get("name").checkjstring();
+				// desc/image optional; onUse is a plain table entry, no validation here.
+				tbl.get("image").optint(0);
+				LuaSpellRegistry.register(id, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_spell rejected a malformed definition", e);
 			}
 			return NIL;
 		}
