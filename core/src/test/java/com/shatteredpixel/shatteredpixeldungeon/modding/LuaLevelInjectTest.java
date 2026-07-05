@@ -264,6 +264,25 @@ public class LuaLevelInjectTest {
 				liveNextId.getInt("nextid"), after.getInt("nextid"));
 	}
 
+	// ---- shipped Lua scripts register via engine init ----
+
+	@Test
+	public void shippedTownScriptsRegisterViaEngineInit() {
+		// Verifies town_portal.lua + town_return.lua parse and register through the
+		// same LuaEngine.loadNpcScripts pipeline that the desktop run uses. Catches
+		// syntax/registration errors in the shipped scripts that injectLevelNpcs
+		// depends on (the spawnForDepth lookup would otherwise silently no-op).
+		LuaEngine.resetForTests();
+		LuaEngine.init();
+		assertTrue("town_portal.lua must register via LuaEngine.init",
+				LuaNpcRegistry.contains("town_portal"));
+		assertTrue("town_return.lua must register via LuaEngine.init",
+				LuaNpcRegistry.contains("town_return"));
+		// And the registered town_portal spawns a real LuaNpc (the exact instance
+		// spawnForDepth would put on a main-line level).
+		assertNotNull(LuaNpcRegistry.create("town_portal"));
+	}
+
 	// ---- helpers ----
 
 	/** Minimal concrete Level for inject tests (NOT a DataDrivenLevel). */
