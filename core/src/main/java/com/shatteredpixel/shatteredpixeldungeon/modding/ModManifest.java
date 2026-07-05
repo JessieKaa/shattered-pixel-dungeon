@@ -54,10 +54,14 @@ public final class ModManifest {
 		if (!spdNode.isLong()) {
 			throw new IllegalArgumentException("spd_version must be an integer, got " + typeDesc(spdNode));
 		}
-		int spdVersion = spdNode.asInt();
-		if (spdVersion <= 0) {
-			throw new IllegalArgumentException("spd_version must be > 0, got " + spdVersion);
+		// asInt() silently narrows out-of-range longs via l2i, so a value like 2^32 + versionCode
+		// would wrap to versionCode and bypass the version gate. Range-check the long first.
+		long spdRaw = spdNode.asLong();
+		if (spdRaw <= 0 || spdRaw > Integer.MAX_VALUE) {
+			throw new IllegalArgumentException(
+					"spd_version must be in [1, " + Integer.MAX_VALUE + "], got " + spdRaw);
 		}
+		int spdVersion = (int) spdRaw;
 
 		if (!ID_PATTERN.matcher(id).matches()) {
 			throw new IllegalArgumentException("invalid mod id: " + id);

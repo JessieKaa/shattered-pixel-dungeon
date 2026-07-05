@@ -130,6 +130,14 @@ public class ModScannerTest {
 	}
 
 	@Test
+	public void manifest_rejectsOutOfRangeSpdVersion() {
+		// 4294968192 == 2^32 + 896 narrows (via asInt l2i) to 896, which would bypass the version
+		// gate; the range check must reject it before narrowing.
+		assertManifestRejected("{'id':'ok','name':'x','version':'1','spd_version':4294968192}",
+				"out-of-int-range spd_version wrapping to 896");
+	}
+
+	@Test
 	public void manifest_rejectsWrongTypeForDefaultEnabled() {
 		// string "true" must not be coerced to boolean
 		assertManifestRejected("{'id':'ok','name':'x','version':'1','spd_version':896,'default_enabled':'true'}",
