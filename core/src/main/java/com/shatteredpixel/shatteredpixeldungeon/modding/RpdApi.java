@@ -14,8 +14,12 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Poison;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Roots;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Slow;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo;
+import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
+import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.npcs.NPC;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
+import com.shatteredpixel.shatteredpixeldungeon.windows.WndMessage;
+import com.watabou.noosa.Game;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
 import org.luaj.vm2.lib.OneArgFunction;
@@ -82,6 +86,11 @@ final class RpdApi {
         rpd.set("spawnAlly", new SpawnAlly());
         rpd.set("commandAlly", new CommandAlly());
         rpd.set("expelAlly", new ExpelAlly());
+        // M4b: NPC dialog primitives. npcYell routes through Mob.yell (GLog line,
+        // NPC-only); showDialog opens a WndMessage on the render thread (onInteract
+        // fires from the actor thread). Both take an int charId and validate it.
+        rpd.set("npcYell", new NpcYell());
+        rpd.set("showDialog", new ShowDialog());
         return rpd;
     }
 
@@ -364,6 +373,54 @@ final class RpdApi {
             return null;
         }
         return (LuaAlly) a;
+    }
+
+    /**
+     * {@code RPD.npcYell(charId, text)} — write an NPC's line to the GLog via
+     * {@link Mob#yell}. NPC-only by intent ({@code npcYell} rejects any non-NPC
+     * Char such as the hero or a hostile mob, so a script cannot spoof a yell
+     * from the wrong speaker). {@code yell} only formats a GLog entry, so it is
+     * safe to call directly from the actor thread that fires {@code onInteract}.
+     */
+    private static final class NpcYell extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue text) {
+            try {
+                Char c = resolveChar(charId);
+                if (c == null) return NIL;
+                if (!(c instanceof NPC)) {
+                    Gdx.app.error(TAG, "npcYell rejected non-NPC charId " + charId.toint());
+                    return NIL;
+                }
+                // Mob.yell lives on Mob; NPC inherits it. Cast safe.
+                ((Mob) c).yell(text.optjstring(""));
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "npcYell threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * {@code RPD.showDialog(charId, text)} — open a {@link WndMessage} showing
+     * {@code text}. The {@code charId} is validated as a live Char (anchor only —
+     * any valid char id is accepted so a script can open a dialog in any
+     * onInteract context) but is not otherwise used: WndMessage has no per-NPC
+     * styling in MVP. Wrapped in {@link Game#runOnRenderThread} because
+     * {@code onInteract} fires on the actor thread and {@link GameScene#show}
+     * must touch the scene graph from the render thread.
+     */
+    private static final class ShowDialog extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue text) {
+            try {
+                Char c = resolveChar(charId);
+                if (c == null) return NIL;
+                String body = text.optjstring("");
+                Game.runOnRenderThread(() -> GameScene.show(new WndMessage(body)));
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "showDialog threw", e);
+            }
+            return NIL;
+        }
     }
 
     /**

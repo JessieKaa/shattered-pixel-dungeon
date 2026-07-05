@@ -68,6 +68,8 @@ public class DataDrivenLevel extends Level {
 	private static final String TAG = "DataDrivenLevel";
 	private static final String LUA_LEVEL_ID = "lua_level_id";
 	private static final String ENTRANCE_CELL = "entrance_cell";
+	/** Mob-spec type prefix that routes a {@link LuaNpc} into a level via the registry. */
+	private static final String LUA_NPC_PREFIX = "lua_npc:";
 
 	private String luaLevelId;
 	private int entranceCell;
@@ -199,6 +201,24 @@ public class DataDrivenLevel extends Level {
 	@Override
 	protected void createMobs() {
 		for (MobSpec spec : mobSpecs) {
+			// M4b: lua_npc:<id> instantiates from LuaNpcRegistry. Handled as a
+			// prefix branch BEFORE the MOB_TYPES lookup because the type carries a
+			// dynamic id — it cannot live in the static class whitelist.
+			if (spec.type != null && spec.type.startsWith(LUA_NPC_PREFIX)) {
+				String npcId = spec.type.substring(LUA_NPC_PREFIX.length());
+				LuaNpc npc = LuaNpcRegistry.create(npcId);
+				if (npc == null) {
+					Gdx.app.error(TAG, "unknown lua_npc id: " + npcId + " — skipping");
+					continue;
+				}
+				if (spec.pos < 0 || spec.pos >= length() || !passable[spec.pos]) {
+					Gdx.app.error(TAG, "lua_npc " + npcId + " pos " + spec.pos + " invalid — skipping");
+					continue;
+				}
+				npc.pos = spec.pos;
+				mobs.add(npc);
+				continue;
+			}
 			Class<? extends Mob> cls = MOB_TYPES.get(spec.type);
 			if (cls == null) {
 				Gdx.app.error(TAG, "unknown mob type: " + spec.type + " — skipping");
