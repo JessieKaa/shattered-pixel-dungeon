@@ -65,7 +65,7 @@ public class WndSaveSlotSelect extends Window {
 		TXT_ZH.put("title_save", "保存到槽位");
 		TXT_ZH.put("title_load", "从槽位加载");
 		TXT_ZH.put("empty", "暂无存档槽位。");
-		TXT_ZH.put("slot_info", "%s  层:%d 级:%d");
+		TXT_ZH.put("slot_info", "%s %d层 %d级");
 		TXT_ZH.put("btn_new", "新建槽位");
 		TXT_ZH.put("btn_save", "保存");
 		TXT_ZH.put("btn_load", "加载");
@@ -103,7 +103,7 @@ public class WndSaveSlotSelect extends Window {
 		TXT_EN.put("title_save", "Save to Slot");
 		TXT_EN.put("title_load", "Load from Slot");
 		TXT_EN.put("empty", "No save slots yet.");
-		TXT_EN.put("slot_info", "%s  d:%d l:%d");
+		TXT_EN.put("slot_info", "%s D%d L%d");
 		TXT_EN.put("btn_new", "New Slot");
 		TXT_EN.put("btn_save", "Save");
 		TXT_EN.put("btn_load", "Load");
@@ -224,7 +224,7 @@ public class WndSaveSlotSelect extends Window {
 		float bx = 0;
 		float by = bottomRowTop;
 
-		boolean showImport = (mode == Mode.SAVE) && bridgeAvailable();
+		boolean showImport = (mode == Mode.LOAD) && bridgeAvailable();
 
 		if (mode == Mode.SAVE) {
 			RedButton newBtn = new RedButton(txt( "btn_new")) {
@@ -233,22 +233,21 @@ public class WndSaveSlotSelect extends Window {
 					askNewSlotName();
 				}
 			};
-			float newBtnW = showImport ? (WIDTH - 22 - BOTTOM_BTN_GAP) * 0.6f : WIDTH - 22 - BOTTOM_BTN_GAP;
-			newBtn.setRect(bx, by, newBtnW, BOTTOM_BTN_HEIGHT);
+			newBtn.setRect(bx, by, WIDTH - 22 - BOTTOM_BTN_GAP, BOTTOM_BTN_HEIGHT);
 			add(newBtn);
 			bx = newBtn.right() + BOTTOM_BTN_GAP;
+		}
 
-			if (showImport) {
-				RedButton importBtn = new RedButton(txt("btn_import"), 6) {
-					@Override
-					protected void onClick() {
-						startImport();
-					}
-				};
-				importBtn.setRect(bx, by, WIDTH - bx - 22 - BOTTOM_BTN_GAP, BOTTOM_BTN_HEIGHT);
-				add(importBtn);
-				bx = importBtn.right() + BOTTOM_BTN_GAP;
-			}
+		if (showImport) {
+			RedButton importBtn = new RedButton(txt("btn_import"), 6) {
+				@Override
+				protected void onClick() {
+					startImport();
+				}
+			};
+			importBtn.setRect(bx, by, WIDTH - 22 - BOTTOM_BTN_GAP, BOTTOM_BTN_HEIGHT);
+			add(importBtn);
+			bx = importBtn.right() + BOTTOM_BTN_GAP;
 		}
 
 		IconButton closeBtn = new IconButton(Icons.get(Icons.CLOSE)) {
@@ -365,7 +364,7 @@ public class WndSaveSlotSelect extends Window {
 			protected void onSelect(int index) {
 				if (index == 0) {
 					SaveSlotService.deleteSlot(name);
-					hide();
+					WndSaveSlotSelect.this.hide();
 					ShatteredPixelDungeon.scene().addToFront(new WndSaveSlotSelect(mode, onCancel));
 				}
 			}
@@ -394,6 +393,7 @@ public class WndSaveSlotSelect extends Window {
 			public void onComplete(boolean ok, String importedName, String message) {
 				if (ok) {
 					hide();
+					ShatteredPixelDungeon.scene().addToFront(new WndSaveSlotSelect(mode, onCancel));
 					ShatteredPixelDungeon.scene().addToFront(new WndMessage(
 							txt("imported", importedName)));
 				} else {
