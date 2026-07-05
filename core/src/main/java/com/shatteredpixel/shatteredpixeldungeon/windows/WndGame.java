@@ -27,6 +27,7 @@ import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
 import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaDebugService;
+import com.shatteredpixel.shatteredpixeldungeon.modding.ModdingService;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.HeroSelectScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
@@ -116,6 +117,10 @@ public class WndGame extends Window {
 
 		// --- Fork: save slot menu (delegates to saveslot subpackage) ---
 		SaveSlotService.addMenuButtons(this);
+		// --- Fork end ---
+
+		// --- Fork(modding-M5b): mod toggle UI (delegates to modding subpackage; debug-only) ---
+		ModdingService.addMenuButtons(this);
 		// --- Fork end ---
 
 		// --- Fork: M0 Lua modding PoC — debug-only button to spawn the Lua test sword ---

@@ -133,6 +133,13 @@ public class LuaEngine implements ResourceFinder {
 			// M4c: same host-side enumeration for shop scripts under scripts/shops/.
 			loadShopScripts();
 
+			// M5b: load each enabled mod's entry script (Remixed-style init.lua that calls
+			// register_*). ModRegistry.all() lazy-scans on first use (production: triggers scan here;
+			// tests: honors a pre-seeded scanDir so init never clobbers injected fixtures). Disabled
+			// mods and mods without an `entry` manifest field are skipped. Per-mod failures are logged
+			// and continue, never fatal — one broken entry cannot crash startup or block other mods.
+			loadModEntryScripts();
+
 			initialized = true;
 		} catch (Exception e) {
 			Gdx.app.error(TAG, "init failed", e);
@@ -218,6 +225,37 @@ public class LuaEngine implements ResourceFinder {
 	 */
 	private void loadShopScripts() {
 		loadScriptsFrom(SHOPS_DIR, "Lua shops", LuaShopRegistry::size);
+	}
+
+	/**
+	 * M5b: load each enabled mod's entry script. The entry path comes from {@link ModManifest#entry}
+	 * (validated at parse time to be a relative, traversal-free {@code .lua} path). For every mod in
+	 * {@link ModRegistry#all()} that is enabled and declares an entry, compile and run
+	 * {@code mods/<id>/<entry>} against the same sandbox globals (so it can call register_*). Disabled
+	 * mods, mods without an entry, and mods whose entry file is missing are skipped — the latter two
+	 * log and continue so one bad entry cannot block other mods or crash startup.
+	 *
+	 * <p>{@link ModRegistry#all()} is the data source (not an explicit {@code scan()} call) because
+	 * {@code all()} lazy-scans only when uninitialized: production gets a fresh scan here on first
+	 * init, while headless tests can pre-seed the registry via the package-private
+	 * {@code ModRegistry.scanDir} without init clobbering their fixture.
+	 */
+	private void loadModEntryScripts() {
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			if (mod.entry == null || mod.entry.isEmpty()) continue;
+			String path = "mods/" + mod.id + "/" + mod.entry;
+			String chunkName = "mod:" + mod.id + ":" + mod.entry;
+			try (InputStream in = findResource(path)) {
+				if (in == null) {
+					Gdx.app.error(TAG, "mod " + mod.id + " entry not found: " + path);
+					continue;
+				}
+				globals.load(new InputStreamReader(in, "UTF-8"), chunkName).call();
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "mod " + mod.id + " entry load failed: " + path, e);
+			}
+		}
 	}
 
 	/**
