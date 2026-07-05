@@ -36,6 +36,7 @@ public class LuaEngine implements ResourceFinder {
 	static final String HEROES_DIR = "scripts/heroes";
 	static final String SPELLS_DIR = "scripts/spells";
 	static final String NPCS_DIR = "scripts/npcs";
+	static final String SHOPS_DIR = "scripts/shops";
 
 	private static LuaEngine instance;
 
@@ -88,6 +89,12 @@ public class LuaEngine implements ResourceFinder {
 			// stats are fixed by NPC's base initialiser, so the Lua table only carries
 			// id/name/sprite + the onInteract callback.
 			globals.set("register_npc", new RegisterNpcFunction());
+			// M4c: register_shop global, mirroring register_npc for Lua-defined shop NPCs
+			// (LuaShopNpc extends LuaNpc — passive/invincible + custom purchase window driven
+			// by the items pool in the Lua table). Stored as-is so LuaShopNpc can re-hydrate
+			// name/sprite/items after a save/load cycle. Per-item id/price validation is
+			// delegated to LuaShopNpc.hydrate (skips bad entries, never fails the whole shop).
+			globals.set("register_shop", new RegisterShopFunction());
 			// M4a: register_level global. Level geometry lives in mods/levels/<id>.json;
 			// this registers the id so Bundle restore (lua_level_id) can re-attach and so a
 			// future Lua level graph can reference it. Optional `path` overrides the default
@@ -122,6 +129,9 @@ public class LuaEngine implements ResourceFinder {
 
 			// M4b: same host-side enumeration for npc scripts under scripts/npcs/.
 			loadNpcScripts();
+
+			// M4c: same host-side enumeration for shop scripts under scripts/shops/.
+			loadShopScripts();
 
 			initialized = true;
 		} catch (Exception e) {
@@ -197,6 +207,17 @@ public class LuaEngine implements ResourceFinder {
 	 */
 	private void loadNpcScripts() {
 		loadScriptsFrom(NPCS_DIR, "Lua npcs", LuaNpcRegistry::size);
+	}
+
+	/**
+	 * M4c: enumerate {@code scripts/shops/*.lua} and compile each. Same host-side
+	 * enumeration + two-stage listing as the other registries (dofile is stripped
+	 * from the sandbox). Lua shops are not part of the vanilla spawn pool — they
+	 * only enter a level via a {@code lua_shop:<id>} entry in a
+	 * {@link DataDrivenLevel} mob spec.
+	 */
+	private void loadShopScripts() {
+		loadScriptsFrom(SHOPS_DIR, "Lua shops", LuaShopRegistry::size);
 	}
 
 	/**
@@ -371,6 +392,40 @@ public class LuaEngine implements ResourceFinder {
 				LuaNpcRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_npc rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_shop(table)} global handed to Lua (M4c). Mirrors
+	 * {@link RegisterNpcFunction}: validates the required top-level fields
+	 * ({@code id/name/items}) and skips on bad input. {@code sprite} is optional
+	 * (defaults to {@code "shopkeeper"}, resolved by {@link LuaShopNpc}). Per-item
+	 * {@code id}/{@code price}/{@code quantity} validation is delegated to
+	 * {@link LuaShopNpc#hydrate}, which skips bad entries rather than rejecting the
+	 * whole shop — one malformed item does not nuke an otherwise valid shop.
+	 */
+	private static class RegisterShopFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_shop: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				tbl.get("name").checkjstring();
+				if (!tbl.get("items").istable()) {
+					Gdx.app.error(TAG, "register_shop '" + id + "': items must be a table — rejected");
+					return NIL;
+				}
+				// sprite optional; per-item validation happens in LuaShopNpc.hydrate.
+				tbl.get("sprite").optjstring("shopkeeper");
+				LuaShopRegistry.register(id, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_shop rejected a malformed definition", e);
 			}
 			return NIL;
 		}
