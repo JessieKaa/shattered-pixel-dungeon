@@ -33,6 +33,7 @@ public class LuaEngine implements ResourceFinder {
 	static final String ITEMS_DIR = "scripts/items";
 	static final String MOBS_DIR = "scripts/mobs";
 	static final String ALLIES_DIR = "scripts/allies";
+	static final String HEROES_DIR = "scripts/heroes";
 
 	private static LuaEngine instance;
 
@@ -73,6 +74,10 @@ public class LuaEngine implements ResourceFinder {
 			// M3b: register_ally global, mirroring register_mob for friendly Lua pets
 			// (LuaAlly extends DirectableAlly — inherit follow/defend/attack + intelligentAlly).
 			globals.set("register_ally", new RegisterAllyFunction());
+			// M3c: register_hero global, mirroring register_mob/ally for Lua-defined hero
+			// classes. The Java-side LuaHeroClass captures the metadata; hero.heroClass stays
+			// equal to talentSource (host) and lua_class_id is the sidecar marker (D3).
+			globals.set("register_hero", new RegisterHeroFunction());
 			// M2: inject the narrow RPD.* surface (affectBuff/damageChar/GLog/...).
 			// Lua never gets a Char object — only int ids resolved via Actor.findById.
 			globals.set("RPD", RpdApi.build());
@@ -93,6 +98,9 @@ public class LuaEngine implements ResourceFinder {
 
 			// M3b: same host-side enumeration for ally scripts under scripts/allies/.
 			loadAllyScripts();
+
+			// M3c: same host-side enumeration for hero scripts under scripts/heroes/.
+			loadHeroScripts();
 
 			initialized = true;
 		} catch (Exception e) {
@@ -134,6 +142,18 @@ public class LuaEngine implements ResourceFinder {
 	 */
 	private void loadAllyScripts() {
 		loadScriptsFrom(ALLIES_DIR, "Lua allies", LuaAllyRegistry::size);
+	}
+
+	/**
+	 * M3c: enumerate {@code scripts/heroes/*.lua} and compile each. Same host-side
+	 * enumeration + two-stage listing as items/mobs/allies (dofile is stripped
+	 * from the sandbox). Lua heroes are not part of the vanilla
+	 * {@code HeroClass.values()} roster — {@code HeroSelectScene} renders them as
+	 * extra buttons and {@code Dungeon.init} routes to {@code Hero.initLuaHero}
+	 * via {@link LuaHeroService} when one is selected.
+	 */
+	private void loadHeroScripts() {
+		loadScriptsFrom(HEROES_DIR, "Lua heroes", LuaHeroRegistry::size);
 	}
 
 	/**
@@ -323,6 +343,33 @@ public class LuaEngine implements ResourceFinder {
 				LuaAllyRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_ally rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_hero(table)} global handed to Lua (M3c). Mirrors
+	 * {@link RegisterMobFunction}/{@link RegisterAllyFunction}: validates required
+	 * fields and skips on bad input. Delegates field parsing to
+	 * {@link LuaHeroClass#hydrate(LuaTable)} (which throws on missing required
+	 * fields or an invalid {@code talentSource}); only registers if hydration
+	 * succeeds. Required: {@code id/name/talentSource/hp}; optional:
+	 * {@code defenseSkill/startingItems/spriteKey}.
+	 */
+	private static class RegisterHeroFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_hero: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				LuaHeroClass hero = LuaHeroClass.hydrate(tbl);
+				LuaHeroRegistry.register(hero, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_hero rejected a malformed definition", e);
 			}
 			return NIL;
 		}

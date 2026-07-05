@@ -189,6 +189,18 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 
+import com.shatteredpixel.shatteredpixeldungeon.Challenges;
+import com.shatteredpixel.shatteredpixeldungeon.QuickSlot;
+import com.badlogic.gdx.Gdx;
+import com.shatteredpixel.shatteredpixeldungeon.items.Waterskin;
+import com.shatteredpixel.shatteredpixeldungeon.items.armor.ClothArmor;
+import com.shatteredpixel.shatteredpixeldungeon.items.bags.VelvetPouch;
+import com.shatteredpixel.shatteredpixeldungeon.items.food.Food;
+import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfIdentify;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaHeroClass;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaHeroRegistry;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaItemRegistry;
+
 public class Hero extends Char {
 
 	{
@@ -210,6 +222,21 @@ public class Hero extends Char {
 	public ArmorAbility armorAbility = null;
 	public ArrayList<LinkedHashMap<Talent, Integer>> talents = new ArrayList<>();
 	public LinkedHashMap<Talent, Talent> metamorphedTalents = new LinkedHashMap<>();
+
+	/**
+	 * M3c Lua hero sidecar marker. Non-null when this hero was created from a
+	 * Lua-defined class (registered via {@code register_hero}). {@code heroClass}
+	 * stays equal to the Lua class's {@code talentSource} (the host) so all
+	 * existing switch code keeps working; this field is what distinguishes "this
+	 * is actually Lua hero X" from a plain host hero.
+	 *
+	 * <p>Persisted via the {@link #LUA_CLASS_ID} bundle key (D3) — deliberately
+	 * NOT through the {@code class} enum channel, because
+	 * {@code Bundle.getEnum("class", HeroClass.class)} silently falls back to
+	 * WARRIOR on any unknown name ({@code Bundle.java:166-174}), which would
+	 * silently corrupt a Lua hero's identity on save/load.
+	 */
+	public String luaClassId;
 	
 	private int attackSkill = 10;
 	private int defenseSkill = 5;
@@ -289,6 +316,11 @@ public class Hero extends Char {
 	private static final String CLASS       = "class";
 	private static final String SUBCLASS    = "subClass";
 	private static final String ABILITY     = "armorAbility";
+	// M3c: Lua hero sidecar key. Deliberately separate from CLASS — the Lua id is
+	// a plain string (not a HeroClass name), so it must NOT round-trip through
+	// Bundle.getEnum("class", HeroClass.class) which would silently fall back to
+	// WARRIOR. See field doc on `luaClassId`.
+	private static final String LUA_CLASS_ID = "lua_class_id";
 
 	private static final String ATTACK		= "attackSkill";
 	private static final String DEFENSE		= "defenseSkill";
@@ -318,6 +350,11 @@ public class Hero extends Char {
 		bundle.put( HTBOOST, HTBoost );
 
 		belongings.storeInBundle( bundle );
+
+		// M3c D3: sidecar marker for a Lua hero. CLASS still stores the host enum
+		// (talentSource) which round-trips cleanly; this key is the authoritative
+		// "this is a Lua hero" marker. See field doc on `luaClassId`.
+		if (luaClassId != null) bundle.put( LUA_CLASS_ID, luaClassId );
 	}
 	
 	@Override
@@ -341,6 +378,86 @@ public class Hero extends Char {
 		STR = bundle.getInt( STRENGTH );
 
 		belongings.restoreFromBundle( bundle );
+
+		// M3c D3: read the Lua sidecar. If present, this hero is a Lua hero —
+		// restore the marker. heroClass already round-tripped to the host enum
+		// via CLASS above (the host name is a valid enum constant, so getEnum
+		// returns it cleanly — the silent-WARRIOR-fallback trap only fires for
+		// unknown names, which we never store). No registry re-hydration needed:
+		// every definitional field (hp/defenseSkill/talents/belongings) already
+		// round-tripped through its own bundle key.
+		if (bundle.contains( LUA_CLASS_ID )) {
+			luaClassId = bundle.getString( LUA_CLASS_ID );
+		}
+	}
+
+	/**
+	 * M3c: initialise a freshly-created hero from a Lua-defined class. Called by
+	 * {@code Dungeon.init} instead of {@code HeroClass.initHero} when
+	 * {@code LuaHeroService.consumePending()} returns a non-null id. Replicates
+	 * the public (non-class-specific) section of {@code HeroClass.initHero}, then
+	 * layers on the Lua class's {@code hp}/{@code defenseSkill}/talentSource
+	 * talents and starting items.
+	 *
+	 * <p>Callers must have already assigned {@code Dungeon.hero = hero} — the
+	 * no-arg {@code Item.collect()} routes through {@code Dungeon.hero.belongings}.
+	 *
+	 * @param id the registered Lua hero id ({@link LuaHeroRegistry}; unknown id → no-op + log)
+	 */
+	public static void initLuaHero( Hero hero, String id ) {
+		if (id == null) return;
+		LuaHeroClass def = LuaHeroRegistry.get(id);
+		if (def == null) {
+			Gdx.app.error("Hero", "initLuaHero: unknown lua hero id '" + id + "'; falling back to vanilla init");
+			return;
+		}
+
+		// Identity: heroClass = host (talentSource), sidecar marker = lua id.
+		hero.heroClass = def.talentSource();
+		hero.luaClassId = id;
+
+		// --- Lua-specific stats. Set before gear so identity/HP are stable even
+		//     if a startingItem collection fails downstream. ---
+		hero.HT = hero.HP = def.hp();
+		hero.defenseSkill = def.defenseSkill();
+
+		// --- D2: talents come from the host class's tree. Talent.java unchanged. ---
+		Talent.initClassTalents( def.talentSource(), hero.talents );
+
+		// --- R6: replicate the public section of HeroClass.initHero verbatim. ---
+		Item i = new ClothArmor().identify();
+		if (!Challenges.isItemBlocked(i)) hero.belongings.armor = (ClothArmor) i;
+
+		i = new Food();
+		if (!Challenges.isItemBlocked(i)) i.collect();
+
+		new VelvetPouch().collect();
+		Dungeon.LimitedDrops.VELVET_POUCH.drop();
+
+		Waterskin waterskin = new Waterskin();
+		waterskin.collect();
+
+		new ScrollOfIdentify().identify();
+
+		if (SPDSettings.quickslotWaterskin()) {
+			for (int s = 0; s < QuickSlot.SIZE; s++) {
+				if (Dungeon.quickslot.getItem(s) == null) {
+					Dungeon.quickslot.setSlot(s, waterskin);
+					break;
+				}
+			}
+		}
+
+		// --- D5: Lua starting items (LuaItem ids). ---
+		for (String itemId : def.startingItems()) {
+			Item luaItem = LuaItemRegistry.create(itemId);
+			if (luaItem != null) {
+				luaItem.collect();
+			} else {
+				Gdx.app.error("Hero", "initLuaHero: lua hero '" + id
+						+ "' references unknown startingItem '" + itemId + "'; skipping");
+			}
+		}
 	}
 	
 	public static void preview( GamesInProgress.Info info, Bundle bundle ) {
