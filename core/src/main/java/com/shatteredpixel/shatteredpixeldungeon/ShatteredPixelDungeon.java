@@ -25,6 +25,7 @@ import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.TitleScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.WelcomeScene;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaEngine;
 import com.watabou.noosa.Game;
 import com.watabou.noosa.audio.Music;
 import com.watabou.noosa.audio.Sample;
@@ -76,6 +77,10 @@ public class ShatteredPixelDungeon extends Game {
 		// Fork: now that libgdx file handles are wired up, sweep any staging/.tmp/.bak
 		// directories left behind by a crashed save-slot import.
 		SaveSlotService.cleanupLeftovers();
+
+		// Fork: M0 Lua modding PoC — bootstrap the luaj engine and run scripts/init.lua.
+		// Gdx.files is live by now, so LuaEngine.findResource can read assets.
+		LuaEngine.init();
 	}
 
 	@Override
