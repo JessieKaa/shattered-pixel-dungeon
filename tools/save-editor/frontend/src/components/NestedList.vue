@@ -30,40 +30,43 @@
       </el-card>
     </template>
 
-    <draggable
+    <VueDraggable
       v-else-if="value && value.length > 0"
-      :list="localItems"
-      :item-key="getItemKey"
-      :handle="'.drag-handle'"
+      v-model="localItems"
+      :animation="150"
+      handle=".drag-handle"
       @end="onDragEnd"
     >
-      <template #item="{ element, index }">
-        <el-card class="item-card" shadow="hover">
-          <div class="item-row">
-            <span class="drag-handle" title="拖拽排序">⋮⋮</span>
-            <strong class="item-title">
-              #{{ index }} · <ItemLabel :class-name="(element as any)?.__className" />
-            </strong>
-            <el-popconfirm
-              title="确认删除该项?"
-              @confirm="onDelete(index)"
-              width="200"
-            >
-              <template #reference>
-                <el-button type="danger" size="small" link>删除</el-button>
-              </template>
-            </el-popconfirm>
-          </div>
+      <el-card
+        v-for="(element, index) in localItems"
+        :key="localKeys[index]"
+        class="item-card"
+        shadow="hover"
+      >
+        <div class="item-row">
+          <span class="drag-handle" title="拖拽排序">⋮⋮</span>
+          <strong class="item-title">
+            #{{ index }} · <ItemLabel :class-name="(element as any)?.__className" />
+          </strong>
+          <el-popconfirm
+            title="确认删除该项?"
+            @confirm="onDelete(index)"
+            width="200"
+          >
+            <template #reference>
+              <el-button type="danger" size="small" link>删除</el-button>
+            </template>
+          </el-popconfirm>
+        </div>
 
-          <NestedObject
-            :value="element"
-            :field-path="itemPath(index)"
-            :search-query="searchQuery"
-            @update="(newItem) => onItemFieldUpdate(index, newItem)"
-          />
-        </el-card>
-      </template>
-    </draggable>
+        <NestedObject
+          :value="element"
+          :field-path="itemPath(index)"
+          :search-query="searchQuery"
+          @update="(newItem) => onItemFieldUpdate(index, newItem)"
+        />
+      </el-card>
+    </VueDraggable>
 
     <AddItemDialog @add="onItemAdd" />
   </div>
@@ -71,7 +74,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import draggable from 'vuedraggable'
+import { VueDraggable } from 'vue-draggable-plus'
 import NestedObject from './NestedObject.vue'
 import AddItemDialog from './AddItemDialog.vue'
 import ItemLabel from './ItemLabel.vue'
@@ -135,15 +138,14 @@ watch(
   { immediate: true, deep: true }
 )
 
-function getItemKey(item: unknown, index: number): string {
-  return localKeys.value[index] ?? makeId()
-}
-
 function emitUpdate() {
   emit('update', localItems.value.slice())
 }
 
 function onDragEnd() {
+  // VueDraggable 的 v-model 已经把 localItems 重排为 SortableJS 的 DOM 顺序;
+  // emit 让父更新 store,props.value 回流后 watch 会用 prevByKey(item 引用)
+  // 重新对齐 localKeys,无需在此手动同步。
   emitUpdate()
 }
 

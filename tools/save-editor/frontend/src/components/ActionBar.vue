@@ -18,6 +18,7 @@
       </el-button-group>
 
       <span class="hint">
+        <span v-if="bundleStore.dirty" class="dirty-flag">● 未保存改动</span>
         undo 栈:{{ historyStore.undoStack.length }} /
         redo 栈:{{ historyStore.redoStack.length }}
         · Ctrl+Z / Ctrl+Shift+Z
@@ -39,9 +40,14 @@
 
       <el-checkbox v-model="forceVersion">force meta.version = 896</el-checkbox>
 
-      <el-button type="primary" :loading="downloading" @click="onDownload">
-        下载 zip
-      </el-button>
+      <el-tooltip
+        content="编辑不会自动保存。完成所有改动后点此按钮,一次性打包下载(仅请求一次后端)"
+        placement="top"
+      >
+        <el-button type="primary" :loading="downloading" @click="onDownload">
+          保存并下载 zip
+        </el-button>
+      </el-tooltip>
     </div>
   </el-card>
 </template>
@@ -110,6 +116,11 @@ function onReset() {
 .hint {
   color: var(--el-text-color-secondary);
   font-size: 0.85em;
+}
+.dirty-flag {
+  color: var(--el-color-danger);
+  font-weight: 600;
+  margin-right: 8px;
 }
 .spacer {
   flex: 1;

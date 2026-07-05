@@ -50,21 +50,25 @@ export const useBundleStore = defineStore('bundle', () => {
   ) {
     if (!bundle.value) return
     bundle.value.game.hero[key] = value
+    dirty.value = true
   }
 
   function replaceHero(hero: GameBundle['hero']) {
     if (!bundle.value) return
     bundle.value.game.hero = hero
+    dirty.value = true
   }
 
   function replaceGame(game: GameBundle) {
     if (!bundle.value) return
     bundle.value.game = game
+    dirty.value = true
   }
 
   function setMetaField<K extends keyof SlotMeta>(key: K, value: SlotMeta[K]) {
     if (!bundle.value) return
     bundle.value.meta[key] = value
+    dirty.value = true
   }
 
   function resetToOriginal() {

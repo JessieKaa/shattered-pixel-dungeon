@@ -12,12 +12,13 @@ Run order:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-URL = "http://127.0.0.1:5010/"
+URL = os.environ.get("SPD_SAVE_EDITOR_URL", "http://127.0.0.1:5010/")
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "sample_save_with_cloth_armor.zip"
 
 

@@ -24,3 +24,6 @@ android/keystore.properties
 #intellij project files
 *.iml
 *.idea
+
+# Save editor: downloaded test artifacts
+new.zip
