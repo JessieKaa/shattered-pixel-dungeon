@@ -1,0 +1,14 @@
+apply plugin: 'java-library'
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+java.sourceCompatibility = java.targetCompatibility = appJavaCompatibility
+
+dependencies {
+    // AutoService generates the javax.annotation.processing.Processor SPI entry
+    // so javac picks up LuaInterfaceProcessor without a manual META-INF/services file.
+    annotationProcessor 'com.google.auto.service:auto-service:1.1.1'
+    compileOnly 'com.google.auto.service:auto-service:1.1.1'
+
+    implementation project(':annotation')
+    implementation 'com.google.guava:guava:32.0.1-jre'
+}

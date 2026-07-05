@@ -1,6 +1,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import com.shatteredpixel.shatteredpixeldungeon.items.weapon.melee.MeleeWeapon;
+import com.shatteredpixel.shatteredpixeldungeon.modding.annotations.LuaInterface;
 import com.watabou.utils.Bundle;
 
 import org.luaj.vm2.LuaTable;
@@ -44,11 +45,13 @@ public class LuaItem extends MeleeWeapon {
 	}
 
 	@Override
+	@LuaInterface
 	public String name() {
 		return nameStr;
 	}
 
 	@Override
+	@LuaInterface
 	public String desc() {
 		return descStr;
 	}

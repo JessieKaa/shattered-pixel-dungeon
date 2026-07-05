@@ -18,6 +18,12 @@ dependencies {
     // Fork: M0 Lua modding PoC — luaj engine (Maven Central standard build)
     implementation 'org.luaj:luaj-jse:3.0.1'
 
+    // Fork: M1 Lua sandbox — @LuaInterface is compile-only (annotation retained
+    // for the processor to see, never needed at runtime); the processor generates
+    // lua-interface-map.json onto the classpath at compile time.
+    compileOnly project(':annotation')
+    annotationProcessor project(':processor')
+
     testImplementation 'junit:junit:4.13.2'
     testImplementation "com.badlogicgames.gdx:gdx-backend-headless:$gdxVersion"
     testImplementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"

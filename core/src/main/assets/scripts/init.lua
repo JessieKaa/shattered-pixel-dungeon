@@ -1,5 +1,7 @@
--- M0 Lua modding init script.
--- Loaded once by LuaEngine.init() on game create().
--- Item definitions live in scripts/items/ and each calls register_item{...}.
-
-dofile("scripts/items/test_sword.lua")
+-- Lua modding bootstrap. Loaded once by LuaEngine.init() on game create().
+--
+-- M1 note: this file is for pure-Lua global setup only. Item scripts under
+-- scripts/items/*.lua are enumerated and compiled by the Java host
+-- (LuaEngine.loadItemScripts) because `dofile` is stripped from the sandbox —
+-- Lua code here cannot dofile/require/loadfile. Add per-item definitions as
+-- separate files in scripts/items/, each calling register_item{...}.

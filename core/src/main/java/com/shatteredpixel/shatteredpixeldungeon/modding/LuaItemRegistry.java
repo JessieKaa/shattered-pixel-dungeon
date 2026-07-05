@@ -27,6 +27,11 @@ public final class LuaItemRegistry {
 		return items.get(id);
 	}
 
+	/** All registered ids. Used by {@link LuaItemPool} to pick uniformly at random. */
+	public static java.util.Set<String> ids() {
+		return java.util.Collections.unmodifiableSet(items.keySet());
+	}
+
 	public static LuaItem create(String id) {
 		LuaTable tbl = items.get(id);
 		if (tbl == null) return null;
@@ -35,6 +40,11 @@ public final class LuaItemRegistry {
 
 	public static boolean contains(String id) {
 		return items.containsKey(id);
+	}
+
+	/** Number of registered items. Used by LuaEngine to warn on empty scans and by tests. */
+	public static int size() {
+		return items.size();
 	}
 
 	/** Test helper — clears registered items so unit tests start from a clean slate. */

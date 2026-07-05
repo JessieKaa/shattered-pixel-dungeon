@@ -193,6 +193,8 @@ import com.shatteredpixel.shatteredpixeldungeon.items.weapon.missiles.ThrowingSt
 import com.shatteredpixel.shatteredpixeldungeon.items.weapon.missiles.Tomahawk;
 import com.shatteredpixel.shatteredpixeldungeon.items.weapon.missiles.Trident;
 import com.shatteredpixel.shatteredpixeldungeon.items.weapon.missiles.darts.Dart;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaItem;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaItemPool;
 import com.shatteredpixel.shatteredpixeldungeon.plants.Blindweed;
 import com.shatteredpixel.shatteredpixeldungeon.plants.Earthroot;
 import com.shatteredpixel.shatteredpixeldungeon.plants.Fadeleaf;
@@ -249,7 +251,13 @@ public class Generator {
 		SCROLL	( 8, 8, Scroll.class ),
 		STONE   ( 1, 1, Runestone.class),
 		
-		GOLD	( 10, 10,   Gold.class );
+		GOLD	( 10, 10,   Gold.class ),
+
+		// Fork (M1 modding): Lua-defined items. firstProb/secondProb are 0 so the
+		// standard drop deck never selects this category — original drop balance is
+		// untouched (C3). Reached only via Generator.random(LUA_ITEM) or a future
+		// opt-in toggle. superClass is LuaItem (a MeleeWeapon subclass).
+		LUA_ITEM(  0,  0,   LuaItem.class );
 		
 		public Class<?>[] classes;
 
@@ -707,6 +715,8 @@ public class Generator {
 				Item item = randomArtifact();
 				//if we're out of artifacts, return a ring instead.
 				return item != null ? item : random(Category.RING);
+			case LUA_ITEM:
+				return randomLuaItem();
 			default:
 				if (cat.defaultProbs != null && cat.seed != null){
 					Random.pushGenerator(cat.seed);
@@ -887,6 +897,18 @@ public class Generator {
 			}
 		}
 		return false;
+	}
+
+	// Fork (M1 modding): spawn a Lua-defined item from LuaItemPool. If no Lua items
+	// are registered (engine not initialised / no scripts), fall back to a vanilla
+	// weapon so the Generator contract (never null) holds. .random() applies the
+	// same +0/+1/+2 upgrade roll vanilla weapons get from Weapon.random().
+	private static Item randomLuaItem() {
+		LuaItem item = LuaItemPool.random();
+		if (item == null) {
+			return random(Category.WEAPON);
+		}
+		return item.random();
 	}
 
 	private static final String FIRST_DECK = "first_deck";
