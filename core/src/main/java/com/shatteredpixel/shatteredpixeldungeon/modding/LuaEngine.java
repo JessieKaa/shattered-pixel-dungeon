@@ -32,6 +32,7 @@ public class LuaEngine implements ResourceFinder {
 	static final String INIT_SCRIPT = "scripts/init.lua";
 	static final String ITEMS_DIR = "scripts/items";
 	static final String MOBS_DIR = "scripts/mobs";
+	static final String ALLIES_DIR = "scripts/allies";
 
 	private static LuaEngine instance;
 
@@ -69,6 +70,9 @@ public class LuaEngine implements ResourceFinder {
 			globals.set("register_item", new RegisterItemFunction());
 			// M3a: register_mob global, mirroring register_item for hostile Lua mobs.
 			globals.set("register_mob", new RegisterMobFunction());
+			// M3b: register_ally global, mirroring register_mob for friendly Lua pets
+			// (LuaAlly extends DirectableAlly — inherit follow/defend/attack + intelligentAlly).
+			globals.set("register_ally", new RegisterAllyFunction());
 			// M2: inject the narrow RPD.* surface (affectBuff/damageChar/GLog/...).
 			// Lua never gets a Char object — only int ids resolved via Actor.findById.
 			globals.set("RPD", RpdApi.build());
@@ -86,6 +90,9 @@ public class LuaEngine implements ResourceFinder {
 
 			// M3a: same host-side enumeration for mob scripts under scripts/mobs/.
 			loadMobScripts();
+
+			// M3b: same host-side enumeration for ally scripts under scripts/allies/.
+			loadAllyScripts();
 
 			initialized = true;
 		} catch (Exception e) {
@@ -117,6 +124,16 @@ public class LuaEngine implements ResourceFinder {
 	 */
 	private void loadMobScripts() {
 		loadScriptsFrom(MOBS_DIR, "Lua mobs", LuaMobRegistry::size);
+	}
+
+	/**
+	 * M3b: enumerate {@code scripts/allies/*.lua} and compile each. Same host-side
+	 * enumeration + two-stage listing as items/mobs (dofile is stripped from the
+	 * sandbox). Lua allies are not part of the vanilla spawn pool — they only
+	 * enter a level via {@code RPD.spawnAlly}.
+	 */
+	private void loadAllyScripts() {
+		loadScriptsFrom(ALLIES_DIR, "Lua allies", LuaAllyRegistry::size);
 	}
 
 	/**
@@ -270,6 +287,42 @@ public class LuaEngine implements ResourceFinder {
 				LuaMobRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_mob rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_ally(table)} global handed to Lua (M3b). Mirrors
+	 * {@link RegisterMobFunction}: validates required fields and skips on bad
+	 * input. Required: {@code id/name/hp/ht/attack/defense}; {@code ht} defaults
+	 * to {@code hp} (matched by {@link LuaAlly#hydrate}). Optional: {@code sprite}
+	 * (string whitelist key) and the AI/command-callback fields
+	 * ({@code act/attackProc/defenseProc/die/onCommand}) — plain table entries,
+	 * validated lazily by {@link LuaItemCallbacks}.
+	 */
+	private static class RegisterAllyFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_ally: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				tbl.get("name").checkjstring();
+				tbl.get("hp").checkint();
+				// ht optional in Lua (LuaAlly hydrate falls back to hp), but if
+				// present it must be an int — check via optint so a non-int ht is
+				// still rejected rather than silently coerced.
+				tbl.get("ht").optint(tbl.get("hp").checkint());
+				tbl.get("attack").checkint();
+				tbl.get("defense").checkint();
+				// sprite + act/attackProc/defenseProc/die/onCommand are optional; no validation here.
+				LuaAllyRegistry.register(id, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_ally rejected a malformed definition", e);
 			}
 			return NIL;
 		}
