@@ -24,9 +24,16 @@ public final class ModManifest {
 	public final String author;
 	public final boolean default_enabled;
 	public final String description;
+	/**
+	 * Optional path (relative to the mod directory) of an entry script loaded for enabled mods by
+	 * {@link LuaEngine}. Null/empty for pure-manifest mods. Validated by {@link #validateEntryPath}
+	 * to be relative, backslash-free, traversal-free, and {@code .lua}-suffixed so one enabled mod
+	 * cannot load another mod's scripts or arbitrary internal assets.
+	 */
+	public final String entry;
 
 	private ModManifest(String id, String name, String version, int spdVersion,
-	                    String author, boolean defaultEnabled, String description) {
+	                    String author, boolean defaultEnabled, String description, String entry) {
 		this.id = id;
 		this.name = name;
 		this.version = version;
@@ -34,6 +41,7 @@ public final class ModManifest {
 		this.author = author;
 		this.default_enabled = defaultEnabled;
 		this.description = description;
+		this.entry = entry;
 	}
 
 	public static ModManifest fromJson(JsonValue v) {
@@ -70,8 +78,10 @@ public final class ModManifest {
 		String author = optionalString(v, "author", "");
 		boolean defaultEnabled = optionalBoolean(v, "default_enabled", false);
 		String description = optionalString(v, "description", "");
+		String entry = optionalString(v, "entry", null);
+		validateEntryPath(entry);
 
-		return new ModManifest(id, name, version, spdVersion, author, defaultEnabled, description);
+		return new ModManifest(id, name, version, spdVersion, author, defaultEnabled, description, entry);
 	}
 
 	private static String requireString(JsonValue v, String key) {
@@ -105,6 +115,30 @@ public final class ModManifest {
 
 	private static String typeDesc(JsonValue node) {
 		return node.type().name();
+	}
+
+	/**
+	 * Enforce that {@code entry} (if declared) is a safe relative {@code .lua} path inside the mod
+	 * directory. Rejects absolute paths, backslashes, {@code ..} traversal, and non-{@code .lua}
+	 * suffixes so an enabled mod cannot reach another mod's disabled entry or other internal assets
+	 * via {@code mods/<id>/<entry>}. Null/empty is allowed (pure-manifest mod, no entry script).
+	 */
+	private static void validateEntryPath(String entry) {
+		if (entry == null || entry.isEmpty()) return;
+		if (!entry.endsWith(".lua")) {
+			throw new IllegalArgumentException("entry must end with .lua, got: " + entry);
+		}
+		if (entry.startsWith("/")) {
+			throw new IllegalArgumentException("entry must be relative (no leading /): " + entry);
+		}
+		if (entry.indexOf('\\') >= 0) {
+			throw new IllegalArgumentException("entry must not contain backslashes: " + entry);
+		}
+		for (String seg : entry.split("/")) {
+			if ("..".equals(seg)) {
+				throw new IllegalArgumentException("entry must not contain '..' segments: " + entry);
+			}
+		}
 	}
 
 	@Override
