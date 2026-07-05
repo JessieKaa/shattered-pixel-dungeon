@@ -1,0 +1,9 @@
+{
+  "id": "test_mod",
+  "name": "测试内容包",
+  "version": "0.1.0",
+  "spd_version": 896,
+  "author": "fork",
+  "default_enabled": false,
+  "description": "M0-M4 测试内容(剑/NPC/商店/城镇)的占位清单"
+}
