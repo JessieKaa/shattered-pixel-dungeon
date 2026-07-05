@@ -40,25 +40,67 @@ public final class ModManifest {
 		if (v == null) {
 			throw new IllegalArgumentException("manifest json is null");
 		}
-		// Required fields: libgdx getString(name)/getInt(name) throw IllegalArgumentException
-		// ("Named value not found: ...") when the key is absent, so missing-required is handled.
-		String id = v.getString("id");
-		String name = v.getString("name");
-		String version = v.getString("version");
-		int spdVersion = v.getInt("spd_version");
+		// Type-strict extraction: libgdx getString/getInt coerce wrong JSON types (e.g. numeric
+		// id -> string, string spd_version -> int), so validate via isString/isLong/isBoolean and
+		// reject type mismatches rather than silently coercing.
+		String id = requireString(v, "id");
+		String name = requireString(v, "name");
+		String version = requireString(v, "version");
 
-		if (id == null || !ID_PATTERN.matcher(id).matches()) {
-			throw new IllegalArgumentException("invalid mod id: " + id);
+		JsonValue spdNode = v.get("spd_version");
+		if (spdNode == null) {
+			throw new IllegalArgumentException("Named value not found: spd_version");
 		}
+		if (!spdNode.isLong()) {
+			throw new IllegalArgumentException("spd_version must be an integer, got " + typeDesc(spdNode));
+		}
+		int spdVersion = spdNode.asInt();
 		if (spdVersion <= 0) {
 			throw new IllegalArgumentException("spd_version must be > 0, got " + spdVersion);
 		}
 
-		String author = v.getString("author", "");
-		boolean defaultEnabled = v.getBoolean("default_enabled", false);
-		String description = v.getString("description", "");
+		if (!ID_PATTERN.matcher(id).matches()) {
+			throw new IllegalArgumentException("invalid mod id: " + id);
+		}
+
+		String author = optionalString(v, "author", "");
+		boolean defaultEnabled = optionalBoolean(v, "default_enabled", false);
+		String description = optionalString(v, "description", "");
 
 		return new ModManifest(id, name, version, spdVersion, author, defaultEnabled, description);
+	}
+
+	private static String requireString(JsonValue v, String key) {
+		JsonValue node = v.get(key);
+		if (node == null) {
+			throw new IllegalArgumentException("Named value not found: " + key);
+		}
+		if (!node.isString()) {
+			throw new IllegalArgumentException(key + " must be a string, got " + typeDesc(node));
+		}
+		return node.asString();
+	}
+
+	private static String optionalString(JsonValue v, String key, String def) {
+		JsonValue node = v.get(key);
+		if (node == null) return def;
+		if (!node.isString()) {
+			throw new IllegalArgumentException(key + " must be a string, got " + typeDesc(node));
+		}
+		return node.asString();
+	}
+
+	private static boolean optionalBoolean(JsonValue v, String key, boolean def) {
+		JsonValue node = v.get(key);
+		if (node == null) return def;
+		if (!node.isBoolean()) {
+			throw new IllegalArgumentException(key + " must be a boolean, got " + typeDesc(node));
+		}
+		return node.asBoolean();
+	}
+
+	private static String typeDesc(JsonValue node) {
+		return node.type().name();
 	}
 
 	@Override

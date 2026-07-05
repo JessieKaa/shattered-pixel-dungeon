@@ -44,11 +44,8 @@ public final class ModRegistry {
 		return Collections.unmodifiableList(scanned);
 	}
 
-	public static synchronized ModManifest get(String id) {
-		for (ModManifest m : scanned) {
-			if (m.id.equals(id)) return m;
-		}
-		return null;
+	public static ModManifest get(String id) {
+		return lookup(id);
 	}
 
 	public static boolean isEnabled(String id) {

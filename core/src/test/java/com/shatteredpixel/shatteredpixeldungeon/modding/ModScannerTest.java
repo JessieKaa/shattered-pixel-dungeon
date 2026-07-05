@@ -116,6 +116,26 @@ public class ModScannerTest {
 		assertManifestRejected("{'id':'ok','name':'x','version':'1','spd_version':-1}", "spd_version negative");
 	}
 
+	@Test
+	public void manifest_rejectsWrongTypeForId() {
+		// numeric id must not be coerced to string
+		assertManifestRejected("{'id':123,'name':'x','version':'1','spd_version':896}", "numeric id");
+	}
+
+	@Test
+	public void manifest_rejectsWrongTypeForSpdVersion() {
+		// string spd_version must not be coerced to int
+		assertManifestRejected("{'id':'ok','name':'x','version':'1','spd_version':'896'}", "string spd_version");
+		assertManifestRejected("{'id':'ok','name':'x','version':'1','spd_version':896.5}", "float spd_version");
+	}
+
+	@Test
+	public void manifest_rejectsWrongTypeForDefaultEnabled() {
+		// string "true" must not be coerced to boolean
+		assertManifestRejected("{'id':'ok','name':'x','version':'1','spd_version':896,'default_enabled':'true'}",
+				"string default_enabled");
+	}
+
 	private void assertManifestRejected(String singleQuoteJson, String msg) {
 		try {
 			ModManifest.fromJson(new JsonReader().parse(singleQuoteJson.replace('\'', '"')));
@@ -176,6 +196,15 @@ public class ModScannerTest {
 		buildMod(modsDir, "good_mod", manifest("good_mod", TEST_VERSION_CODE, false));
 		List<ModManifest> mods = ModScanner.scanDir(new FileHandle(modsDir));
 		assertEquals("broken mod skipped, good mod kept", ids(mods), Set.of("good_mod"));
+	}
+
+	@Test
+	public void scan_skipsWrongTypeFields() throws IOException {
+		File modsDir = newModsDir();
+		// string spd_version (type error) -> skip; sibling good mod kept
+		buildMod(modsDir, "typed_wrong", "{'id':'typed_wrong','name':'x','version':'1','spd_version':'896'}");
+		buildMod(modsDir, "good_mod", manifest("good_mod", TEST_VERSION_CODE, false));
+		assertEquals(ids(ModScanner.scanDir(new FileHandle(modsDir))), Set.of("good_mod"));
 	}
 
 	@Test
