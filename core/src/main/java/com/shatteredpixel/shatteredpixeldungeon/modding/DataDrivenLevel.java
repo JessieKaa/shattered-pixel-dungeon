@@ -70,6 +70,8 @@ public class DataDrivenLevel extends Level {
 	private static final String ENTRANCE_CELL = "entrance_cell";
 	/** Mob-spec type prefix that routes a {@link LuaNpc} into a level via the registry. */
 	private static final String LUA_NPC_PREFIX = "lua_npc:";
+	/** Mob-spec type prefix that routes a {@link LuaShopNpc} into a level via the registry. */
+	private static final String LUA_SHOP_PREFIX = "lua_shop:";
 
 	private String luaLevelId;
 	private int entranceCell;
@@ -217,6 +219,24 @@ public class DataDrivenLevel extends Level {
 				}
 				npc.pos = spec.pos;
 				mobs.add(npc);
+				continue;
+			}
+			// M4c: lua_shop:<id> instantiates from LuaShopRegistry, mirroring the
+			// lua_npc branch. Handled before MOB_TYPES for the same reason (the type
+			// carries a dynamic id that cannot live in the static class whitelist).
+			if (spec.type != null && spec.type.startsWith(LUA_SHOP_PREFIX)) {
+				String shopId = spec.type.substring(LUA_SHOP_PREFIX.length());
+				LuaShopNpc shop = LuaShopRegistry.create(shopId);
+				if (shop == null) {
+					Gdx.app.error(TAG, "unknown lua_shop id: " + shopId + " — skipping");
+					continue;
+				}
+				if (spec.pos < 0 || spec.pos >= length() || !passable[spec.pos]) {
+					Gdx.app.error(TAG, "lua_shop " + shopId + " pos " + spec.pos + " invalid — skipping");
+					continue;
+				}
+				shop.pos = spec.pos;
+				mobs.add(shop);
 				continue;
 			}
 			Class<? extends Mob> cls = MOB_TYPES.get(spec.type);

@@ -99,7 +99,12 @@ public class LuaNpc extends NPC {
 		SPRITES.put("imp", ImpSprite.class);
 	}
 
-	private static Class<? extends CharSprite> resolveSprite(String name) {
+	/**
+	 * Resolve a whitelisted sprite class by name (M4b: RatKing fallback on unknown).
+	 * M4c: widened from {@code private} to {@code protected static} so {@link LuaShopNpc}
+	 * can reuse the same whitelist instead of duplicating it; behaviour is unchanged.
+	 */
+	protected static Class<? extends CharSprite> resolveSprite(String name) {
 		Class<? extends CharSprite> c = name == null ? null : SPRITES.get(name.toLowerCase());
 		return c != null ? c : RatKingSprite.class;
 	}

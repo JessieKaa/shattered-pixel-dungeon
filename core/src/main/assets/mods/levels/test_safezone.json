@@ -272,6 +272,10 @@
     {
       "type": "lua_npc:test_npc",
       "pos": 102
+    },
+    {
+      "type": "lua_shop:test_shop",
+      "pos": 120
     }
   ],
   "items": [
