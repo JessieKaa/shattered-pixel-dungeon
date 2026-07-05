@@ -30,6 +30,9 @@ import com.shatteredpixel.shatteredpixeldungeon.Rankings;
 import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
 import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaHeroClass;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaHeroRegistry;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaHeroService;
 import com.shatteredpixel.shatteredpixeldungeon.journal.Journal;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.ui.ActionIndicator;
@@ -196,6 +199,17 @@ public class HeroSelectScene extends PixelScene {
 			HeroBtn button = new HeroBtn(cl);
 			add(button);
 			heroBtns.add(button);
+		}
+
+		// M3c: extra buttons for Lua-defined hero classes. Added to the same
+		// heroBtns list so the existing layout auto-adjusts columns/width. v1
+		// shows the host class's spritesheet (no new hero art shipped).
+		if (!LuaHeroRegistry.all().isEmpty()) {
+			for (LuaHeroClass lc : LuaHeroRegistry.all()) {
+				LuaHeroBtn button = new LuaHeroBtn(lc);
+				add(button);
+				heroBtns.add(button);
+			}
 		}
 
 		optionsPane = new GameOptions();
@@ -598,13 +612,19 @@ public class HeroSelectScene extends PixelScene {
 
 			if( !cl.isUnlocked() ){
 				ShatteredPixelDungeon.scene().addToFront( new WndMessage(cl.unlockMsg()));
-			} else if (GamesInProgress.selectedClass == cl) {
+			} else if (GamesInProgress.selectedClass == cl && LuaHeroService.peekPending() == null) {
+				// Genuinely already on this vanilla class with no Lua hero pending → info window.
 				Window w = new WndHeroInfo(cl);
 				if (landscape()){
 					w.offset(Camera.main.width/6, 0);
 				}
 				ShatteredPixelDungeon.scene().addToFront(w);
 			} else {
+				// M3c: selecting a vanilla class abandons any previously-selected Lua hero.
+				// This branch also covers the case where selectedClass == cl BUT a Lua hero
+				// of the same host was pending (e.g. Lua-WARRIOR-hero → click vanilla Warrior):
+				// the player wants to switch back to the vanilla class, so clear + reselect.
+				LuaHeroService.clearSelectedLuaHero();
 				setSelectedHero(cl);
 			}
 		}
@@ -615,6 +635,54 @@ public class HeroSelectScene extends PixelScene {
 			//if we're super tall (i.e. rendering into display inset) then put hero at the top
 			if (height > 30) {
 				icon.y = y + (HEIGHT - icon.height()) / 2f;
+			}
+		}
+	}
+
+	/**
+	 * M3c: a button for a Lua-defined hero class. Visual analogue of
+	 * {@link HeroBtn} — uses the host class's spritesheet (M3c ships no new hero
+	 * art) and shares {@link HeroBtn#HEIGHT} so the existing
+	 * {@code heroBtns} layout positions it identically. Clicking records the
+	 * Lua id via {@link LuaHeroService} and shows the host class's splash/title
+	 * (R4 cosmetic downgrade: the info panel shows the host until GamesInProgress
+	 * grows a {@code luaClassId} field, deferred v1).
+	 */
+	private class LuaHeroBtn extends StyledButton {
+
+		private final LuaHeroClass lc;
+
+		LuaHeroBtn( LuaHeroClass lc ) {
+			super(Chrome.Type.GREY_BUTTON_TR, "");
+			this.lc = lc;
+			// No Lua hero art shipped (M3c) — reuse the host class's spritesheet.
+			icon(new Image(lc.talentSource().spritesheet(), 0, 90, 12, 15));
+		}
+
+		@Override
+		public void update() {
+			super.update();
+			boolean selected = lc.id().equals(LuaHeroService.peekPending());
+			icon.brightness(selected ? 1f : 0.6f);
+		}
+
+		@Override
+		protected void onClick() {
+			super.onClick();
+			// Selecting a Lua hero: stash the id for Dungeon.init, set the host
+			// as selectedClass (for splash/title + GamesInProgress), and run the
+			// vanilla UI setup. The host's initHero is NOT used — Dungeon.init's
+			// guard routes to Hero.initLuaHero because consumePending() != null.
+			LuaHeroService.selectLuaHero(lc.id());
+			GamesInProgress.selectedClass = lc.talentSource();
+			setSelectedHero(lc.talentSource());
+		}
+
+		@Override
+		protected void layout() {
+			super.layout();
+			if (height > 30) {
+				icon.y = y + (HeroBtn.HEIGHT - icon.height()) / 2f;
 			}
 		}
 	}
@@ -736,6 +804,8 @@ public class HeroSelectScene extends PixelScene {
 						@Override
 						protected void onSelect(int index) {
 							if (index == 0){
+								// M3c: daily is vanilla-only — never carry a Lua hero into a daily run.
+								LuaHeroService.clearSelectedLuaHero();
 								if (diff <= 0) {
 									long time = Game.realTime - (Game.realTime % DAY);
 
@@ -839,6 +909,8 @@ public class HeroSelectScene extends PixelScene {
 							do {
 								randomCls = Random.oneOf(HeroClass.values());
 							} while (!randomCls.isUnlocked());
+							// M3c: randomize picks a vanilla class — drop any pending Lua hero.
+							LuaHeroService.clearSelectedLuaHero();
 							setSelectedHero(randomCls);
 							GamesInProgress.randomizedClass = true;
 						}
@@ -939,6 +1011,8 @@ public class HeroSelectScene extends PixelScene {
 							do {
 								randomCls = Random.oneOf(HeroClass.values());
 							} while (!randomCls.isUnlocked());
+							// M3c: randomize picks a vanilla class — drop any pending Lua hero.
+							LuaHeroService.clearSelectedLuaHero();
 							setSelectedHero(randomCls);
 							GamesInProgress.randomizedClass = true;
 						} else {

@@ -280,10 +280,20 @@ public class Dungeon {
 
 		hero = new Hero();
 		hero.live();
-		
+
 		Badges.reset();
-		
-		GamesInProgress.selectedClass.initHero( hero );
+
+		// M3c: route to the Lua hero init path when the player selected a Lua
+		// class in HeroSelectScene. consumePending() atomically captures and
+		// clears the pending id, so a stale Lua id can never leak into a later
+		// vanilla/daily start even if this throws. HeroClass.initHero runs
+		// unchanged for the 6 vanilla classes (C3/C4 — HeroClass enum untouched).
+		String pendingLua = com.shatteredpixel.shatteredpixeldungeon.modding.LuaHeroService.consumePending();
+		if (pendingLua != null) {
+			Hero.initLuaHero( hero, pendingLua );
+		} else {
+			GamesInProgress.selectedClass.initHero( hero );
+		}
 	}
 
 	public static boolean isChallenged( int mask ) {
