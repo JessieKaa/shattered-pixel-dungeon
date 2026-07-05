@@ -31,6 +31,7 @@ public class LuaEngine implements ResourceFinder {
 	private static final String TAG = "LuaEngine";
 	static final String INIT_SCRIPT = "scripts/init.lua";
 	static final String ITEMS_DIR = "scripts/items";
+	static final String MOBS_DIR = "scripts/mobs";
 
 	private static LuaEngine instance;
 
@@ -66,6 +67,8 @@ public class LuaEngine implements ResourceFinder {
 			globals = LuaSandbox.exposedGlobals();
 			globals.finder = this;
 			globals.set("register_item", new RegisterItemFunction());
+			// M3a: register_mob global, mirroring register_item for hostile Lua mobs.
+			globals.set("register_mob", new RegisterMobFunction());
 			// M2: inject the narrow RPD.* surface (affectBuff/damageChar/GLog/...).
 			// Lua never gets a Char object — only int ids resolved via Actor.findById.
 			globals.set("RPD", RpdApi.build());
@@ -80,6 +83,9 @@ public class LuaEngine implements ResourceFinder {
 			// dofile is stripped from the sandbox (N2), so the host loads each item
 			// script itself rather than relying on Lua-side dofile.
 			loadItemScripts();
+
+			// M3a: same host-side enumeration for mob scripts under scripts/mobs/.
+			loadMobScripts();
 
 			initialized = true;
 		} catch (Exception e) {
@@ -100,17 +106,37 @@ public class LuaEngine implements ResourceFinder {
 	 * {@code AssetManager.list} and packaged-jar runs.
 	 */
 	private void loadItemScripts() {
-		String[] names = listItemScriptNames();
+		loadScriptsFrom(ITEMS_DIR, "Lua items", LuaItemRegistry::size);
+	}
+
+	/**
+	 * M3a: enumerate {@code scripts/mobs/*.lua} and compile each. Same host-side
+	 * enumeration + two-stage listing as items (dofile is stripped from the
+	 * sandbox). Lua mobs are not part of the vanilla spawn pool — they only enter
+	 * a level via {@code RPD.spawnMob}.
+	 */
+	private void loadMobScripts() {
+		loadScriptsFrom(MOBS_DIR, "Lua mobs", LuaMobRegistry::size);
+	}
+
+	/**
+	 * Shared loader for item/mob script directories. Compiles each {@code *.lua}
+	 * file in {@code dir} via the host-side {@code Globals.load} (sandbox-safe —
+	 * Lua-side {@code dofile} is stripped). Per-file errors are logged, never
+	 * fatal. {@code registrySize} is used only for the "nothing registered" warning.
+	 */
+	private void loadScriptsFrom(String dir, String label, java.util.function.IntSupplier registrySize) {
+		String[] names = listScriptNames(dir);
 		if (names.length == 0) {
-			Gdx.app.error(TAG, ITEMS_DIR + " contains no .lua files; no Lua items registered");
+			Gdx.app.error(TAG, dir + " contains no .lua files; no " + label + " registered");
 			return;
 		}
 		java.util.Arrays.sort(names);
 		for (String n : names) {
-			String path = ITEMS_DIR + "/" + n;
+			String path = dir + "/" + n;
 			try (InputStream in = findResource(path)) {
 				if (in == null) {
-					Gdx.app.error(TAG, "Item script " + path + " could not be opened");
+					Gdx.app.error(TAG, "Script " + path + " could not be opened");
 					continue;
 				}
 				globals.load(new InputStreamReader(in, "UTF-8"), path).call();
@@ -118,22 +144,22 @@ public class LuaEngine implements ResourceFinder {
 				Gdx.app.error(TAG, "Failed to load " + path, e);
 			}
 		}
-		if (LuaItemRegistry.size() == 0) {
-			Gdx.app.error(TAG, "No Lua items registered after scanning " + ITEMS_DIR);
+		if (registrySize.getAsInt() == 0) {
+			Gdx.app.error(TAG, "No " + label + " registered after scanning " + dir);
 		}
 	}
 
 	/**
-	 * Lists {@code *.lua} filenames under {@link #ITEMS_DIR}.
+	 * Lists {@code *.lua} filenames under a scripts directory.
 	 * Stage 1: classpath-as-filesystem (works in tests + unpacked desktop runs).
 	 * Stage 2: libgdx {@code FileHandle.list()} (Android AssetManager, packaged jars).
 	 */
-	private String[] listItemScriptNames() {
+	private String[] listScriptNames(String dir) {
 		try {
-			java.net.URL dirUrl = LuaEngine.class.getClassLoader().getResource(ITEMS_DIR);
+			java.net.URL dirUrl = LuaEngine.class.getClassLoader().getResource(dir);
 			if (dirUrl != null && "file".equals(dirUrl.getProtocol())) {
-				java.io.File dir = new java.io.File(dirUrl.toURI());
-				java.io.File[] files = dir.listFiles();
+				java.io.File dirFile = new java.io.File(dirUrl.toURI());
+				java.io.File[] files = dirFile.listFiles();
 				if (files != null) {
 					java.util.List<String> out = new java.util.ArrayList<>();
 					for (java.io.File f : files) {
@@ -143,13 +169,13 @@ public class LuaEngine implements ResourceFinder {
 				}
 			}
 		} catch (Exception e) {
-			Gdx.app.error(TAG, "Classpath-FS enumeration of " + ITEMS_DIR + " failed, falling back", e);
+			Gdx.app.error(TAG, "Classpath-FS enumeration of " + dir + " failed, falling back", e);
 		}
 		// Fallback: libgdx FileHandle.list() (Android/packaged).
 		try {
-			FileHandle dir = Gdx.files.internal(ITEMS_DIR);
-			if (dir != null && dir.exists()) {
-				FileHandle[] kids = dir.list();
+			FileHandle dirHandle = Gdx.files.internal(dir);
+			if (dirHandle != null && dirHandle.exists()) {
+				FileHandle[] kids = dirHandle.list();
 				java.util.List<String> out = new java.util.ArrayList<>();
 				for (FileHandle k : kids) {
 					if (k.name().endsWith(".lua")) out.add(k.name());
@@ -157,7 +183,7 @@ public class LuaEngine implements ResourceFinder {
 				return out.toArray(new String[0]);
 			}
 		} catch (Exception e) {
-			Gdx.app.error(TAG, "Gdx fallback list of " + ITEMS_DIR + " failed", e);
+			Gdx.app.error(TAG, "Gdx fallback list of " + dir + " failed", e);
 		}
 		return new String[0];
 	}
@@ -208,6 +234,42 @@ public class LuaEngine implements ResourceFinder {
 				LuaItemRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_item rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_mob(table)} global handed to Lua (M3a). Mirrors
+	 * {@link RegisterItemFunction}: validates required fields and skips on bad
+	 * input. Required: {@code id/name/hp/ht/attack/defense}; {@code ht} defaults
+	 * to {@code hp} (matched by {@link LuaMob#hydrate}). Optional: {@code sprite}
+	 * (string whitelist key) and the AI-callback fields
+	 * ({@code act/attackProc/defenseProc/die}) — plain table entries, validated
+	 * lazily by {@link LuaItemCallbacks}.
+	 */
+	private static class RegisterMobFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_mob: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				tbl.get("name").checkjstring();
+				tbl.get("hp").checkint();
+				// ht optional in Lua (LuaMob hydrate falls back to hp), but if
+				// present it must be an int — check via optint so a non-int ht is
+				// still rejected rather than silently coerced.
+				tbl.get("ht").optint(tbl.get("hp").checkint());
+				tbl.get("attack").checkint();
+				tbl.get("defense").checkint();
+				// sprite + act/attackProc/defenseProc/die are optional; no validation here.
+				LuaMobRegistry.register(id, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_mob rejected a malformed definition", e);
 			}
 			return NIL;
 		}
