@@ -74,8 +74,7 @@ public class LuaModEntryTest {
 	public void isolateState() {
 		GameSettings.set(new FakePreferences());
 		ModRegistry.resetForTests();
-		LuaItemRegistry.clear();
-		LuaEngine.resetForTests();
+		ModTestSupport.resetLuaState();
 	}
 
 	// ---------------- entry loading (real test_mod asset) ----------------
@@ -89,8 +88,10 @@ public class LuaModEntryTest {
 
 		assertTrue("test_mod_item should be registered when test_mod is enabled",
 				LuaItemRegistry.contains("test_mod_item"));
-		// Flat scripts still load (regression guard for the existing pipeline).
-		assertTrue("flat test_sword must still register", LuaItemRegistry.contains("test_sword"));
+		// M5c: test_sword loads from mods/test_mod/scripts/items/ (mod-scoped), so it
+		// registers alongside the entry item when test_mod is enabled.
+		assertTrue("test_sword must register when test_mod is enabled",
+				LuaItemRegistry.contains("test_sword"));
 	}
 
 	@Test
@@ -102,7 +103,9 @@ public class LuaModEntryTest {
 
 		assertFalse("test_mod_item must NOT register when test_mod is disabled",
 				LuaItemRegistry.contains("test_mod_item"));
-		assertTrue("flat test_sword is unaffected by mod state",
+		// M5c: test_sword is now mod-scoped (mods/test_mod/scripts/items/), so a disabled
+		// test_mod must NOT register it either — the toggle fully controls all Lua content.
+		assertFalse("test_sword is mod-gated; disabled test_mod must NOT register it",
 				LuaItemRegistry.contains("test_sword"));
 	}
 

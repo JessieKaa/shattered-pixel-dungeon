@@ -9,6 +9,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent;
 import com.watabou.utils.Bundle;
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.luaj.vm2.Globals;
@@ -54,6 +55,7 @@ import static org.junit.Assert.assertTrue;
 public class LuaHeroTest {
 
 	private static HeadlessApplication application;
+	private static int savedVersionCode;
 
 	@BeforeClass
 	public static void initHeadless() {
@@ -65,12 +67,20 @@ public class LuaHeroTest {
 		// sets this on startup; mirror a non-empty value so the item-identify path
 		// used by Hero.initLuaHero's replicated public section can run.
 		com.watabou.noosa.Game.version = "test";
-		LuaHeroRegistry.clear();
-		LuaEngine.resetForTests();
+		// M5c: version gate admits test_mod (spd_version=896) so its hero script loads.
+		savedVersionCode = com.watabou.noosa.Game.versionCode;
+		com.watabou.noosa.Game.versionCode = 896;
+	}
+
+	@Before
+	public void resetModAndLuaState() throws Exception {
+		ModTestSupport.enableTestMod();
+		ModTestSupport.resetLuaState();
 	}
 
 	@AfterClass
 	public static void shutdown() {
+		com.watabou.noosa.Game.versionCode = savedVersionCode;
 		try { if (application != null) application.exit(); } catch (Throwable ignored) { }
 	}
 

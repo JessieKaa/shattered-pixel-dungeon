@@ -6,6 +6,7 @@ import com.badlogic.gdx.backends.headless.HeadlessApplicationConfiguration;
 import com.shatteredpixel.shatteredpixeldungeon.items.bags.Bag;
 import com.watabou.utils.Bundle;
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.luaj.vm2.Globals;
@@ -50,6 +51,7 @@ import static org.junit.Assert.assertTrue;
 public class LuaSpellTest {
 
 	private static HeadlessApplication application;
+	private static int savedVersionCode;
 
 	@BeforeClass
 	public static void initHeadless() {
@@ -60,12 +62,20 @@ public class LuaSpellTest {
 		// value so static initialisers downstream of Item do not trip (LuaHeroTest
 		// does the same for the Document path).
 		com.watabou.noosa.Game.version = "test";
-		LuaSpellRegistry.clear();
-		LuaEngine.resetForTests();
+		// M5c: version gate admits test_mod (spd_version=896) so its spell script loads.
+		savedVersionCode = com.watabou.noosa.Game.versionCode;
+		com.watabou.noosa.Game.versionCode = 896;
+	}
+
+	@Before
+	public void resetModAndLuaState() throws Exception {
+		ModTestSupport.enableTestMod();
+		ModTestSupport.resetLuaState();
 	}
 
 	@AfterClass
 	public static void shutdown() {
+		com.watabou.noosa.Game.versionCode = savedVersionCode;
 		try { if (application != null) application.exit(); } catch (Throwable ignored) { }
 	}
 

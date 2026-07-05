@@ -10,6 +10,7 @@ import com.shatteredpixel.shatteredpixeldungeon.items.food.Berry;
 import com.shatteredpixel.shatteredpixeldungeon.items.food.SmallRation;
 import com.shatteredpixel.shatteredpixeldungeon.items.potions.PotionOfHealing;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.ShopkeeperSprite;
+import com.watabou.noosa.Game;
 import com.watabou.utils.Bundle;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -59,24 +60,28 @@ import static org.junit.Assert.assertTrue;
 public class LuaShopTest {
 
 	private static HeadlessApplication application;
+	private static int savedVersionCode;
 
 	@BeforeClass
 	public static void initHeadless() {
 		HeadlessApplicationConfiguration config = new HeadlessApplicationConfiguration();
 		config.updatesPerSecond = 1;
 		application = new HeadlessApplication(new ApplicationAdapter() {}, config);
-		LuaShopRegistry.clear();
-		LuaEngine.resetForTests();
+		savedVersionCode = Game.versionCode;
+		Game.versionCode = 896;
 	}
 
 	@AfterClass
 	public static void shutdown() {
+		Game.versionCode = savedVersionCode;
 		try { if (application != null) application.exit(); } catch (Throwable ignored) { }
 	}
 
 	/** Reset gold before each buy test so order doesn't matter. */
 	@Before
-	public void resetGold() {
+	public void resetGold() throws Exception {
+		ModTestSupport.enableTestMod();
+		ModTestSupport.resetLuaState();
 		Dungeon.gold = 0;
 	}
 

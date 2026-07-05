@@ -62,6 +62,7 @@ public class LuaLevelInjectTest {
 
 	private static HeadlessApplication application;
 	private static String prevVersion;
+	private static int savedVersionCode;
 
 	@BeforeClass
 	public static void initHeadless() {
@@ -69,13 +70,15 @@ public class LuaLevelInjectTest {
 		config.updatesPerSecond = 1;
 		application = new HeadlessApplication(new ApplicationAdapter() {}, config);
 		prevVersion = Game.version;
-		LuaNpcRegistry.clear();
-		LuaEngine.resetForTests();
+		// M5c: version gate admits test_mod (spd_version=896) so its NPC scripts load.
+		savedVersionCode = Game.versionCode;
+		Game.versionCode = 896;
 	}
 
 	@AfterClass
 	public static void shutdown() {
 		Game.version = prevVersion;
+		Game.versionCode = savedVersionCode;
 		// Restore null/safe globals we may have mutated.
 		Dungeon.hero = null;
 		Dungeon.gold = 0;
@@ -85,10 +88,11 @@ public class LuaLevelInjectTest {
 	}
 
 	@Before
-	public void resetPerTest() {
+	public void resetPerTest() throws Exception {
+		ModTestSupport.enableTestMod();
+		ModTestSupport.resetLuaState();
 		// Default to a non-INDEV version so isDebug() == false unless a test opts in.
 		Game.version = "1.0.0-release";
-		LuaNpcRegistry.clear();
 	}
 
 	// ---- spawnForDepth routing ----

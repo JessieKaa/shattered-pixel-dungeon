@@ -8,8 +8,10 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.BlacksmithSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.RatKingSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.ShopkeeperSprite;
+import com.watabou.noosa.Game;
 import com.watabou.utils.Bundle;
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.luaj.vm2.Globals;
@@ -57,18 +59,26 @@ import static org.junit.Assert.assertTrue;
 public class LuaNpcTest {
 
 	private static HeadlessApplication application;
+	private static int savedVersionCode;
 
 	@BeforeClass
 	public static void initHeadless() {
 		HeadlessApplicationConfiguration config = new HeadlessApplicationConfiguration();
 		config.updatesPerSecond = 1;
 		application = new HeadlessApplication(new ApplicationAdapter() {}, config);
-		LuaNpcRegistry.clear();
-		LuaEngine.resetForTests();
+		savedVersionCode = Game.versionCode;
+		Game.versionCode = 896;
+	}
+
+	@Before
+	public void resetModAndLuaState() throws Exception {
+		ModTestSupport.enableTestMod();
+		ModTestSupport.resetLuaState();
 	}
 
 	@AfterClass
 	public static void shutdown() {
+		Game.versionCode = savedVersionCode;
 		try { if (application != null) application.exit(); } catch (Throwable ignored) { }
 	}
 

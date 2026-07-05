@@ -3,12 +3,14 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 import com.shatteredpixel.shatteredpixeldungeon.items.Generator;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.backends.headless.HeadlessApplication;
 import com.badlogic.gdx.backends.headless.HeadlessApplicationConfiguration;
+import com.watabou.noosa.Game;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -30,24 +32,32 @@ import static org.junit.Assert.assertTrue;
 public class GeneratorLuaItemTest {
 
     private static HeadlessApplication application;
+    private static int savedVersionCode;
 
     @BeforeClass
     public static void initHeadless() {
         HeadlessApplicationConfiguration config = new HeadlessApplicationConfiguration();
         config.updatesPerSecond = 1;
         application = new HeadlessApplication(new ApplicationAdapter() {}, config);
-        LuaItemRegistry.clear();
-        LuaEngine.resetForTests();
+        savedVersionCode = Game.versionCode;
+        Game.versionCode = 896;
+    }
+
+    @Before
+    public void resetModAndLuaState() throws Exception {
+        ModTestSupport.enableTestMod();
+        ModTestSupport.resetLuaState();
     }
 
     @AfterClass
     public static void shutdown() {
+        Game.versionCode = savedVersionCode;
         try { if (application != null) application.exit(); } catch (Throwable ignored) { }
     }
 
     @Test
     public void poolEmptyWhenNoScriptsHaveRun() {
-        // Registry was cleared in @BeforeClass and the engine has not been init()ed.
+        // Registry was cleared in @Before and the engine has not been init()ed.
         assertEquals(0, LuaItemRegistry.size());
         assertNull("LuaItemPool.random() must be null when the registry is empty",
                 LuaItemPool.random());
