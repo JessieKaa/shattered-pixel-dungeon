@@ -35,6 +35,7 @@ public class LuaEngine implements ResourceFinder {
 	static final String ALLIES_DIR = "scripts/allies";
 	static final String HEROES_DIR = "scripts/heroes";
 	static final String SPELLS_DIR = "scripts/spells";
+	static final String NPCS_DIR = "scripts/npcs";
 
 	private static LuaEngine instance;
 
@@ -82,6 +83,11 @@ public class LuaEngine implements ResourceFinder {
 			// M3d: register_spell global, mirroring register_item for Lua-defined consumable
 			// spells (LuaSpell extends Item — detach-on-use + onUse(heroId) callback).
 			globals.set("register_spell", new RegisterSpellFunction());
+			// M4b: register_npc global, mirroring register_mob/ally for Lua-defined interactive
+			// NPCs (LuaNpc extends NPC — passive/invincible + onInteract(heroId) callback). NPC
+			// stats are fixed by NPC's base initialiser, so the Lua table only carries
+			// id/name/sprite + the onInteract callback.
+			globals.set("register_npc", new RegisterNpcFunction());
 			// M4a: register_level global. Level geometry lives in mods/levels/<id>.json;
 			// this registers the id so Bundle restore (lua_level_id) can re-attach and so a
 			// future Lua level graph can reference it. Optional `path` overrides the default
@@ -113,6 +119,9 @@ public class LuaEngine implements ResourceFinder {
 
 			// M3d: same host-side enumeration for spell scripts under scripts/spells/.
 			loadSpellScripts();
+
+			// M4b: same host-side enumeration for npc scripts under scripts/npcs/.
+			loadNpcScripts();
 
 			initialized = true;
 		} catch (Exception e) {
@@ -177,6 +186,17 @@ public class LuaEngine implements ResourceFinder {
 	 */
 	private void loadSpellScripts() {
 		loadScriptsFrom(SPELLS_DIR, "Lua spells", LuaSpellRegistry::size);
+	}
+
+	/**
+	 * M4b: enumerate {@code scripts/npcs/*.lua} and compile each. Same host-side
+	 * enumeration + two-stage listing as items/mobs/allies/heroes/spells (dofile
+	 * is stripped from the sandbox). Lua NPCs are not part of the vanilla spawn
+	 * pool — they only enter a level via a {@code lua_npc:<id>} entry in a
+	 * {@link DataDrivenLevel} mob spec.
+	 */
+	private void loadNpcScripts() {
+		loadScriptsFrom(NPCS_DIR, "Lua npcs", LuaNpcRegistry::size);
 	}
 
 	/**
@@ -322,6 +342,35 @@ public class LuaEngine implements ResourceFinder {
 				LuaSpellRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_spell rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_npc(table)} global handed to Lua (M4b). Mirrors
+	 * {@link RegisterSpellFunction}: validates required fields ({@code id/name})
+	 * and skips on bad input. {@code sprite} is optional (defaults to
+	 * {@code "rat_king"}, resolved by {@link LuaNpc}); the {@code onInteract}
+	 * callback field is a plain table entry validated lazily by
+	 * {@link LuaItemCallbacks}.
+	 */
+	private static class RegisterNpcFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_npc: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				tbl.get("name").checkjstring();
+				// sprite optional; onInteract is a plain table entry, no validation here.
+				tbl.get("sprite").optjstring("rat_king");
+				LuaNpcRegistry.register(id, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_npc rejected a malformed definition", e);
 			}
 			return NIL;
 		}
