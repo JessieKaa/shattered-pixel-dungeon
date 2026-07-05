@@ -130,6 +130,18 @@ public class ModScannerTest {
 	}
 
 	@Test
+	public void manifest_acceptsNonCanonicalDecimalSpdVersion() {
+		// libgdx JsonReader is lenient: a leading-zero token like 0896 (invalid strict JSON) still
+		// parses as the integer 896. The version gate compares integer VALUES, so the declared
+		// value (896) == evaluated value (896) == Game.versionCode(896). There is no integrity
+		// bypass: an author declaring 0896 means 896, and JsonValue cannot distinguish the raw
+		// tokens anyway. This test documents the intentional behavior.
+		ModManifest m = ModManifest.fromJson(new JsonReader().parse(
+				"{'id':'ok','name':'x','version':'1','spd_version':0896}".replace('\'', '"')));
+		assertEquals(896, m.spd_version);
+	}
+
+	@Test
 	public void manifest_rejectsOutOfRangeSpdVersion() {
 		// 4294968192 == 2^32 + 896 narrows (via asInt l2i) to 896, which would bypass the version
 		// gate; the range check must reject it before narrowing.

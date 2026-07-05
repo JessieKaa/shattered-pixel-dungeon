@@ -252,3 +252,14 @@ Bootstrap:沿 `DataDrivenLevelTest` 惯例 `@BeforeClass` 建 `HeadlessApplicati
 - [nice-to-have] **`spd_version <= 0` 拒绝**(不只 `<0`):`versionCode==0` 是配置错态,拒绝 `spd_version:0` 避免掩盖坏初始化。
 
 采纳后 PLAN 更新:ModScanner 伪码 + Steps §2/§3 + 测试 §6(reflect 上述)。Round-2 不再跑(smoke 过即采用,沿用 M4d workaround)。
+
+### Round 2-3(实现评审,共 3 轮,2 must-fix 已修 + 1 非可操作 finding 记录)
+
+- [Round2 must-fix,已修] **类型严格解析**:libgdx `getString`/`getInt` 静默 coerce 错误类型(数字 id / 字符串 spd_version / 字符串 default_enabled)。改 `isString()`/`isLong()`/`isBoolean()` 门 + `requireString`/`optionalString`/`optionalBoolean` helper。+4 测试。
+- [Round2 must-fix,已修] **`ModRegistry.get(id)` 不 lazy-scan**:原直接遍历未初始化的 `scanned` 返 null。改 delegate 到 `lookup(id)`(与 `isEnabled` 同路径)。
+- [Round3 must-fix,已修] **int 窄化绕过版本门**:`asInt()` 经 `l2i` 静默截断超范围 long,`spd_version:4294968192`(2^32+896)会 wrap 成 896 通过门。改 `asLong()` + 范围校验 `[1, Integer.MAX_VALUE]` 再窄化。+1 测试。
+- [Round3 must-fix,非可操作,记录] **非规范 JSON 数字 token**(`0896`/`+896`):libgdx lenient JsonReader 把 `0896` 解析为整数 896。**判定非 bug**:版本门比较整数 *值*,声明值(896)== 评估值(896)== versionCode(896),作者声明 0896 即意指 896,无完整性绕过(恶意作者可直接写 `896`)。且 JsonValue 不暴露原始 token,在值层无法区分 `0896` vs `896`,要拒绝须弃用 JsonValue 改 raw-text 解析, disproportionate。`manifest_acceptsNonCanonicalDecimalSpdVersion` 测试显式文档化此 intentional 行为。若未来要求严格 JSON,需切严格解析器(留 M5b+ 评估)。
+
+## Pending Issues
+
+- **严格 JSON 数字 token**(codex round-3 提出,worker 判定非可操作):`0896`/`+896` 等非规范 token 被 libgdx lenient 解析为同值整数。当前按版本门 `==` 值比较判定正确(声明值==评估值)。若产品要求 strict JSON,需在 ModScanner 引入严格数字校验(raw-text 层),非 M5a 范围。
