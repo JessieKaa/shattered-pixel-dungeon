@@ -138,7 +138,7 @@
 
 ### M5 — mod 治理 + 平衡收尾
 
-- **状态**: `[ ]` 待启动
+- **状态**: `[x]` 已完成(M5a 清单+版本门 `51db427ba` / M5b UI+entry `05e700e04` / M5c 目录化+默认关闭+C3回归 `13b0d56a8`,3 feature 合 master `13b0d56a8`,216 tests 全绿)。test_mod `default_enabled=false` → 零 Lua 内容(C3 回归守住);`WndModManager` 开关(isDebug 守卫)+ LuaEngine entry 加载 + 脚本目录化(`mods/<id>/scripts/<type>/`)按 enabled mod 扫描
 - **目标**: 体系对玩家可控、对平衡可守
 - **范围**:
   - mod 目录扫描 + 版本兼容检查(`version.json` 的 `rpd_version` 等价物)
@@ -174,8 +174,8 @@ M0 → M1 → M2 → [D1-D4 决策门] → M3 → M4 → M5
 | M2 核心 API 暴露 | `[x]` | M1 | 高 | 1(m2-item-api) | 仅 Item API;关卡 API(Painter/Room)移到 M4 |
 | M3 深度系统 + 机制骨架 | `[x]` | M2 + D1-D4 | 极高 | 4(m3a-mob/m3b-pet/m3c-hero/m3d-spell) | D1 消耗性/D2 复用天赋/D3 ally/D4 保留硬编码 |
 | M4 关卡 / 城镇 / 广度 | `[x]` | M3 | 中 | 4(M4a Level/M4b NPC/M4c shop/M4d 主线可达) | 核心:数据驱动 Level + Lua NPC + 商店 + 主线注入(isDebug 守卫)+ R4 leaveLevel 状态保留 |
-| M5 mod 治理 + 平衡 | `[ ]` | M4 | 中 | 3-4 | |
-| **合计(M0-M4 已完成)** | | | | **11** | |
+| M5 mod 治理 + 平衡 | `[x]` | M4 | 中 | 3(M5a 清单+版本门/M5b UI+entry/M5c 目录化+默认关闭) | 清单+版本门 / 开关UI+entry加载 / 脚本目录化+default_enabled=false → C3 守住 |
+| **合计(M0-M5 全部完成)** | | | | **14** | |
 
 ---
 
@@ -197,3 +197,4 @@ M0 → M1 → M2 → [D1-D4 决策门] → M3 → M4 → M5
 | 2026-07-05 | M0-M3 完成(7 feature 合 master);M2 关卡 API(Painter/Room/Trap)移至 M4;M3 按 D1-D4 拆 m3a-mob/m3b-pet/m3c-hero/m3d-spell;M4 启动(m4a-data-driven-level 进行中) | dispatcher |
 | 2026-07-05 | M4 核心三件套完成(M4a Level `ac5fa76f6`/M4b NPC `68ff41f25`/M4c shop `873753f92`,3 feature 合 master `873753f92`,174 tests 全绿);**M4d 主线可达推迟到 M5**(玩家开关+接入一起做);M4 累计 10 feature(M0-M3 7 + M4 3) | dispatcher |
 | 2026-07-06 | M4 全部完成(M4d 主线可达+R4状态保留 `5db7b23ce` 合 master,185 tests 全绿);M0-M4 累计 11 feature;启动 M5 mod 治理 + 平衡收尾 | dispatcher |
+| 2026-07-06 | M5 全部完成(M5a `51db427ba`/M5b `05e700e04`/M5c `13b0d56a8` 合 master,216 tests 全绿);**M0-M5 全部完成,累计 14 feature**;SPD×Remixed Lua modding 平台闭环(清单+版本门+开关UI+entry+目录化+默认关闭+C3 回归) | dispatcher |
