@@ -66,6 +66,9 @@ public class LuaEngine implements ResourceFinder {
 			globals = LuaSandbox.exposedGlobals();
 			globals.finder = this;
 			globals.set("register_item", new RegisterItemFunction());
+			// M2: inject the narrow RPD.* surface (affectBuff/damageChar/GLog/...).
+			// Lua never gets a Char object — only int ids resolved via Actor.findById.
+			globals.set("RPD", RpdApi.build());
 
 			InputStream in = findResource(INIT_SCRIPT);
 			if (in != null) {
@@ -198,7 +201,10 @@ public class LuaEngine implements ResourceFinder {
 				String id = tbl.get("id").checkjstring();
 				tbl.get("name").checkjstring();
 				tbl.get("tier").checkint();
-				tbl.get("image").checkint();
+				// M2: image is optional (defaults to 0). Callback fields
+				// (attackProc/onEquip/onDeactivate) are plain table entries and
+				// need no validation here — LuaItemCallbacks handles missing ones.
+				tbl.get("image").optint(0);
 				LuaItemRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_item rejected a malformed definition", e);

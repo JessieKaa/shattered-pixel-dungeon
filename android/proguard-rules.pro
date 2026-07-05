@@ -43,3 +43,19 @@
 # calls them, but R8 sees the references inside the luaj jar.
 -dontwarn javax.script.**
 -dontwarn org.apache.bcel.**
+
+# M2 Lua modding: RpdApi references these buff classes by Class literal to build
+# the affectBuff whitelist. The broad -keepnames com.shatteredpixel.** rule above
+# already retains them; this explicit rule documents the dependency and keeps
+# the members RpdApi calls (Bleeding.set / Poison.set / Barkskin.set / Buff.prolong)
+# in case the broad rule is ever narrowed during R8 config experiments.
+-keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Bleeding { *; }
+-keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Poison { *; }
+-keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Barkskin { *; }
+-keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Roots { *; }
+-keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Slow { *; }
+-keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Cripple { *; }
+-keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Paralysis { *; }
+-keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo { *; }
+-keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Haste { *; }
+-keep class com.shatteredpixel.shatteredpixeldungeon.modding.** { *; }
