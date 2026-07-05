@@ -64,7 +64,7 @@
 
 ### M0 — 最小 Lua 闭环(可行性 PoC)
 
-- **状态**: `[ ]` 待启动
+- **状态**: `[x]` 已完成(commit a304d2e71)
 - **目标**: 证明 luaj 能嵌进 SPD,能 new 出一个 Lua 定义的物品
 - **范围**:
   - 引入 `luaj` 作为独立 Gradle 模块(与 `SPD-classes` 同级)
@@ -79,7 +79,7 @@
 
 ### M1 — 沙箱 + 内容注册管线
 
-- **状态**: `[ ]` 待启动
+- **状态**: `[x]` 已完成(commit 84f0477f7)
 - **目标**: 把"Lua 定义 → 注册进 SPD 工厂"做扎实,加边界
 - **范围**:
   - 移植 `annotation` + `processor` 模块
@@ -95,7 +95,7 @@
 
 ### M2 — 核心 API 暴露
 
-- **状态**: `[ ]` 待启动
+- **状态**: `[x]` 已完成(commit a25105fa2;**仅 Item API,关卡 API Painter/Room/Trap 移至 M4**)
 - **目标**: Lua 能写**完整行为**的内容(不止数值 stub)
 - **范围**:
   - `scripts/lib/*.lua` 等价物:暴露 `actionsProc` / `Buff.onAttach` / `Char` 属性 / `Hero` 背包接口
@@ -109,7 +109,7 @@
 
 ### M3 — 深度系统边界 + 机制骨架(关键分叉) ⭐ 决策门
 
-- **状态**: `[ ]` 待启动(**前置:D1-D4 决策定稿**)
+- **状态**: `[x]` 已完成(D1-D4 定稿:D1 消耗性 spell / D2 复用 4 职业天赋 / D3 ally 宠物 / D4 保留硬编码。4 feature 合 master:m3a-mob 634da866d / m3b-pet 83f946057 / m3c-hero 015eb97ea / m3d-spell 5bb3d7ce9)
 - **目标**: 新职业能玩通一周目;法术/宠物骨架定型
 - **范围**:
   - 按 D1 实现法术(mana 或消耗性 spell)
@@ -124,7 +124,7 @@
 
 ### M4 — 关卡 / 城镇 / 广度内容
 
-- **状态**: `[ ]` 待启动
+- **状态**: `[~]` 进行中(m4a-data-driven-level worker e270fc17;计划拆 m4a Level / m4b 图 / m4c 城镇 / m4d 多店)
 - **目标**: 加广度容量(基础设施已铺好,本阶段主要是消费 API)
 - **范围**:
   - `levelsDesc/*.json` 图结构(线性 + 枢纽 + 副本)
@@ -169,13 +169,13 @@ M0 → M1 → M2 → [D1-D4 决策门] → M3 → M4 → M5
 
 | 里程碑 | 状态 | 依赖 | 难度 | 预估 feature 数 | 备注 |
 |---|---|---|---|---|---|
-| M0 最小 Lua 闭环 | `[ ]` | — | 中 | 2-3 | 可行性 PoC |
-| M1 沙箱 + 注册管线 | `[ ]` | M0 | 中高 | 3-4 | |
-| M2 核心 API 暴露 | `[ ]` | M1 | 高 | 4-6 | 工作量主峰 |
-| M3 深度系统 + 机制骨架 | `[ ]` | M2 + D1-D4 | 极高 | 5-8 | 决策门,可能拆 a/b |
-| M4 关卡 / 城镇 / 广度 | `[ ]` | M3 | 中 | 4-5 | |
+| M0 最小 Lua 闭环 | `[x]` | — | 中 | 1(m0-lua-poc) | luaj 嵌入 + 测试剑 |
+| M1 沙箱 + 注册管线 | `[x]` | M0 | 中高 | 1(m1-sandbox) | @LuaInterface + processor + Generator 双源 |
+| M2 核心 API 暴露 | `[x]` | M1 | 高 | 1(m2-item-api) | 仅 Item API;关卡 API(Painter/Room)移到 M4 |
+| M3 深度系统 + 机制骨架 | `[x]` | M2 + D1-D4 | 极高 | 4(m3a-mob/m3b-pet/m3c-hero/m3d-spell) | D1 消耗性/D2 复用天赋/D3 ally/D4 保留硬编码 |
+| M4 关卡 / 城镇 / 广度 | `[~]` | M3 | 中 | 0/4(m4a-data-driven-level 进行中) | 拆 m4a Level/m4b 图/m4c 城镇/m4d 多店 |
 | M5 mod 治理 + 平衡 | `[ ]` | M4 | 中 | 3-4 | |
-| **合计** | | | | **21-30** | |
+| **合计(M0-M3 已完成)** | | | | **7** | |
 
 ---
 
@@ -194,3 +194,4 @@ M0 → M1 → M2 → [D1-D4 决策门] → M3 → M4 → M5
 | 日期 | 变更 | 作者 |
 |---|---|---|
 | 2026-07-05 | 初版路线图落盘 | dispatcher |
+| 2026-07-05 | M0-M3 完成(7 feature 合 master);M2 关卡 API(Painter/Room/Trap)移至 M4;M3 按 D1-D4 拆 m3a-mob/m3b-pet/m3c-hero/m3d-spell;M4 启动(m4a-data-driven-level 进行中) | dispatcher |
