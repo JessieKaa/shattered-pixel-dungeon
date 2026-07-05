@@ -30,3 +30,16 @@
 -keepclassmembers class com.badlogic.gdx.backends.android.AndroidInput* {
     <init>(com.badlogic.gdx.Application, android.content.Context, java.lang.Object, com.badlogic.gdx.backends.android.AndroidApplicationConfiguration);
 }
+
+# Fork (M1 modding): luaj is reflection-heavy (CoerceJava, LuaTable), keep it
+# intact so the runtime sandbox and Lua item pipeline survive R8 minification.
+# The @LuaInterface whitelist (lua-interface-map.json) is a classpath resource
+# and is not stripped; the modding.* package is already covered by the
+# -keepnames com.shatteredpixel.** rule at the top of this file.
+-keep class org.luaj.vm2.** { *; }
+
+# luaj-jse ships optional code paths that reference the javax.script ScriptEngine
+# SPI and Apache BCEL bytecode classes. Neither exists on Android and SPD never
+# calls them, but R8 sees the references inside the luaj jar.
+-dontwarn javax.script.**
+-dontwarn org.apache.bcel.**

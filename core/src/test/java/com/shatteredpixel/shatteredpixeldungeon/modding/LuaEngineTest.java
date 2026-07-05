@@ -33,6 +33,7 @@ public class LuaEngineTest {
 		config.updatesPerSecond = 1;
 		application = new HeadlessApplication(new ApplicationAdapter() {}, config);
 		LuaItemRegistry.clear();
+		LuaEngine.resetForTests();
 	}
 
 	@AfterClass

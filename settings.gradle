@@ -15,3 +15,7 @@ include ':services'
     //news
     include ':services:news:debugNews'
     include ':services:news:shatteredNews'
+
+// Fork (M1 modding): @LuaInterface annotation + compile-time processor
+include ':annotation'
+include ':processor'
