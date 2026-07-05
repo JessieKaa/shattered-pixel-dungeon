@@ -82,6 +82,11 @@ public class LuaEngine implements ResourceFinder {
 			// M3d: register_spell global, mirroring register_item for Lua-defined consumable
 			// spells (LuaSpell extends Item — detach-on-use + onUse(heroId) callback).
 			globals.set("register_spell", new RegisterSpellFunction());
+			// M4a: register_level global. Level geometry lives in mods/levels/<id>.json;
+			// this registers the id so Bundle restore (lua_level_id) can re-attach and so a
+			// future Lua level graph can reference it. Optional `path` overrides the default
+			// mods/levels/<id>.json location (consumed by LuaLevelService in M4b).
+			globals.set("register_level", new RegisterLevelFunction());
 			// M2: inject the narrow RPD.* surface (affectBuff/damageChar/GLog/...).
 			// Lua never gets a Char object — only int ids resolved via Actor.findById.
 			globals.set("RPD", RpdApi.build());
@@ -416,6 +421,35 @@ public class LuaEngine implements ResourceFinder {
 				LuaHeroRegistry.register(hero, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_hero rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_level(table)} global handed to Lua (M4a). Mirrors the other
+	 * register_* globals but lighter: a level is a JSON-file-backed {@link DataDrivenLevel},
+	 * so the Lua table only carries metadata — required {@code id}/{@code name}, optional
+	 * {@code path} (defaults to {@code mods/levels/<id>.json}, consumed by LuaLevelService).
+	 * The table is registered as-is so {@link DataDrivenLevel#restoreFromBundle} can
+	 * re-hydrate via {@link LuaLevelRegistry} (R3).
+	 */
+	private static class RegisterLevelFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_level: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				tbl.get("name").checkjstring();
+				// path optional; default resolved at load time.
+				tbl.get("path").optjstring("mods/levels/" + id + ".json");
+				LuaLevelRegistry.register(id, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_level rejected a malformed definition", e);
 			}
 			return NIL;
 		}

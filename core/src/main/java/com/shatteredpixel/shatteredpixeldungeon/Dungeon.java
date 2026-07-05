@@ -714,6 +714,12 @@ public class Dungeon {
 	}
 	
 	public static void saveAll() throws IOException {
+		// FORK(modding-M4a): never persist an ephemeral level (e.g. JSON-driven SafeZone).
+		// Saving it would overwrite the real depth's level file with the SafeZone map.
+		// The guard self-clears once Dungeon.level is swapped back to a real level.
+		if (level != null && level.isEphemeral()) {
+			return;
+		}
 		if (hero != null && (hero.isAlive() || WndResurrect.instance != null)) {
 			
 			Actor.fixTime();
@@ -880,6 +886,9 @@ public class Dungeon {
 	}
 	
 	public static void fail( Object cause ) {
+		// FORK(modding-M4a): never submit Rankings from an ephemeral level (e.g. JSON
+		// SafeZone). Hero.die intercepts first, but belt-and-suspenders any other path.
+		if (level != null && level.isEphemeral()) return;
 		if (WndResurrect.instance == null) {
 			updateLevelExplored();
 			Statistics.gameWon = false;

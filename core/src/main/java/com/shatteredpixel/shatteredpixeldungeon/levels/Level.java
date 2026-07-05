@@ -357,6 +357,13 @@ public abstract class Level implements Bundlable {
 	public void playLevelMusic(){
 		//do nothing by default
 	}
+
+	// FORK(modding-M4a): ephemeral levels (e.g. JSON-driven debug SafeZones) must never
+	// be persisted — saving one would overwrite the real depth's level file. Dungeon.saveAll
+	// guards on this. Default false; DataDrivenLevel overrides to true.
+	public boolean isEphemeral() {
+		return false;
+	}
 	
 	@Override
 	public void restoreFromBundle( Bundle bundle ) {

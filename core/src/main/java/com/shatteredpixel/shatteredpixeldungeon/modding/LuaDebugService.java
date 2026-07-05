@@ -8,19 +8,28 @@ import com.shatteredpixel.shatteredpixeldungeon.windows.WndGame;
 import com.watabou.utils.DeviceCompat;
 
 /**
- * Single-point hook into {@link WndGame} that hands the player the Lua-defined
- * test sword. Debug-only: the {@link DeviceCompat#isDebug()} guard keeps the
- * button out of release builds, and the item is never registered with
- * {@code Generator.Category}, so the original drop pool is untouched (C3).
+ * Single-point hook into {@link WndGame} for the Lua/modding debug surface. Debug-only:
+ * every entry is gated on {@link DeviceCompat#isDebug()} so nothing here ships in release,
+ * and none of the actions touch the vanilla loot/spawn pool (C3).
  *
- * Label is hardcoded on purpose — Messages.get does not reliably resolve keys
- * for fork classes (see CLAUDE.md), and this button only shows in INDEV builds.
+ * <p>Buttons:
+ * <ul>
+ *   <li><b>Lua: 给测试剑</b> — drop the registered test sword into the backpack (M1).</li>
+ *   <li><b>Lua: 进入/离开 Test SafeZone</b> — enter/leave the M4a JSON level. Label flips
+ *       based on whether the hero is currently inside a {@link DataDrivenLevel}.</li>
+ * </ul>
+ *
+ * <p>Labels are hardcoded on purpose — Messages.get does not reliably resolve keys for fork
+ * classes (see CLAUDE.md), and these buttons only show in INDEV builds.
  */
 public final class LuaDebugService {
 
 	private static final String TAG = "LuaDebugService";
 	private static final String TEST_SWORD_ID = "test_sword";
-	private static final String BUTTON_LABEL = "Lua: 给测试剑 (debug)";
+	private static final String TEST_SAFEZONE_ID = "test_safezone";
+	private static final String SWORD_BTN = "Lua: 给测试剑 (debug)";
+	private static final String ENTER_SZ_BTN = "Lua: 进入 Test SafeZone (debug)";
+	private static final String LEAVE_SZ_BTN = "Lua: 离开 SafeZone (debug)";
 
 	private LuaDebugService() { }
 
@@ -28,14 +37,29 @@ public final class LuaDebugService {
 	public static void addMenuButton(WndGame wnd) {
 		if (!DeviceCompat.isDebug()) return;
 
-		RedButton btn = new RedButton(BUTTON_LABEL) {
+		RedButton sword = new RedButton(SWORD_BTN) {
 			@Override
 			protected void onClick() {
 				wnd.hide();
 				giveTestItem(Dungeon.hero);
 			}
 		};
-		wnd.addButton(btn);
+		wnd.addButton(sword);
+
+		// M4a: JSON SafeZone. Label depends on whether we're already inside one.
+		final boolean inDataLevel = LuaLevelService.inDataLevel();
+		RedButton safeZone = new RedButton(inDataLevel ? LEAVE_SZ_BTN : ENTER_SZ_BTN) {
+			@Override
+			protected void onClick() {
+				wnd.hide();
+				if (inDataLevel) {
+					LuaLevelService.leaveLevel();
+				} else {
+					LuaLevelService.enterLevel(TEST_SAFEZONE_ID);
+				}
+			}
+		};
+		wnd.addButton(safeZone);
 	}
 
 	/** Create the registered test sword and drop it into the hero's backpack. Defensive: never throws. */

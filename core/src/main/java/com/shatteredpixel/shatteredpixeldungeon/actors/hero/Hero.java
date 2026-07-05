@@ -200,6 +200,7 @@ import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfIdentify;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaHeroClass;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaHeroRegistry;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaItemRegistry;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaLevelService;
 
 public class Hero extends Char {
 
@@ -2250,6 +2251,12 @@ public class Hero extends Char {
 	public void die( Object cause ) {
 
 		curAction = null;
+
+		// --- Fork: modding-M4a ephemeral level death guard ---
+		// A hero can still die inside a JSON SafeZone from a carried debuff; the upstream
+		// death chain would delete the real run + submit Rankings. Restore via CONTINUE.
+		if (LuaLevelService.interceptDeath(this, cause)) return;
+		// --- Fork end ---
 
 		// --- Fork: save slot death reload (recursive re-entry on cancel) ---
 		if (SaveSlotService.interceptDeath(this, cause)) return;
