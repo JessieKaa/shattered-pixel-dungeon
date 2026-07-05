@@ -3,7 +3,9 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.backends.headless.HeadlessApplication;
 import com.badlogic.gdx.backends.headless.HeadlessApplicationConfiguration;
+import com.watabou.noosa.Game;
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.luaj.vm2.Globals;
@@ -34,18 +36,26 @@ import static org.junit.Assert.assertTrue;
 public class LuaItemCallbackTest {
 
     private static HeadlessApplication application;
+    private static int savedVersionCode;
 
     @BeforeClass
     public static void initHeadless() {
         HeadlessApplicationConfiguration config = new HeadlessApplicationConfiguration();
         config.updatesPerSecond = 1;
         application = new HeadlessApplication(new ApplicationAdapter() {}, config);
-        LuaItemRegistry.clear();
-        LuaEngine.resetForTests();
+        savedVersionCode = Game.versionCode;
+        Game.versionCode = 896;
+    }
+
+    @Before
+    public void resetModAndLuaState() throws Exception {
+        ModTestSupport.enableTestMod();
+        ModTestSupport.resetLuaState();
     }
 
     @AfterClass
     public static void shutdown() {
+        Game.versionCode = savedVersionCode;
         try { if (application != null) application.exit(); } catch (Throwable ignored) { }
     }
 

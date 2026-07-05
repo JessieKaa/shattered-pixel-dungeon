@@ -19,8 +19,14 @@ import java.io.InputStreamReader;
  * curated set with every dangerous library/function stripped (io/os/luajava/load/
  * loadfile/dofile/loadstring/require/...). Because {@code dofile} is no longer
  * available to Lua, item-script loading moved to the Java side: this engine
- * enumerates {@code scripts/items/*.lua} and compiles each via the host-side
- * {@code Globals.load} (a Java method, independent of the removed Lua global).
+ * enumerates {@code mods/<id>/scripts/items/*.lua} for each enabled mod and
+ * compiles each via the host-side {@code Globals.load} (a Java method,
+ * independent of the removed Lua global).
+ *
+ * <p>M5c: all Lua content (items/mobs/allies/heroes/spells/npcs/shops) is scoped
+ * per enabled mod under {@code mods/<id>/scripts/<type>/}. A disabled mod
+ * contributes zero Lua content — the C3 regression baseline (vanilla playthrough
+ * loads no Lua content when every mod is {@code default_enabled=false}).
  *
  * <p>Exposes a single {@code register_item(table)} global so Lua scripts can hand
  * item definitions to Java, and runs {@code scripts/init.lua} once on game start
@@ -30,13 +36,6 @@ public class LuaEngine implements ResourceFinder {
 
 	private static final String TAG = "LuaEngine";
 	static final String INIT_SCRIPT = "scripts/init.lua";
-	static final String ITEMS_DIR = "scripts/items";
-	static final String MOBS_DIR = "scripts/mobs";
-	static final String ALLIES_DIR = "scripts/allies";
-	static final String HEROES_DIR = "scripts/heroes";
-	static final String SPELLS_DIR = "scripts/spells";
-	static final String NPCS_DIR = "scripts/npcs";
-	static final String SHOPS_DIR = "scripts/shops";
 
 	private static LuaEngine instance;
 
@@ -111,26 +110,15 @@ public class LuaEngine implements ResourceFinder {
 				Gdx.app.error(TAG, INIT_SCRIPT + " not found in assets");
 			}
 
-			// dofile is stripped from the sandbox (N2), so the host loads each item
-			// script itself rather than relying on Lua-side dofile.
+			// M5c: each loader scans mods/<id>/scripts/<type>/ for every enabled mod. Disabled mods
+			// contribute no Lua content; dofile is stripped from the sandbox (N2), so the host
+			// compiles each script itself.
 			loadItemScripts();
-
-			// M3a: same host-side enumeration for mob scripts under scripts/mobs/.
 			loadMobScripts();
-
-			// M3b: same host-side enumeration for ally scripts under scripts/allies/.
 			loadAllyScripts();
-
-			// M3c: same host-side enumeration for hero scripts under scripts/heroes/.
 			loadHeroScripts();
-
-			// M3d: same host-side enumeration for spell scripts under scripts/spells/.
 			loadSpellScripts();
-
-			// M4b: same host-side enumeration for npc scripts under scripts/npcs/.
 			loadNpcScripts();
-
-			// M4c: same host-side enumeration for shop scripts under scripts/shops/.
 			loadShopScripts();
 
 			// M5b: load each enabled mod's entry script (Remixed-style init.lua that calls
@@ -147,84 +135,102 @@ public class LuaEngine implements ResourceFinder {
 	}
 
 	/**
-	 * Enumerate {@code scripts/items/*.lua} and compile each in the sandbox. Errors
-	 * per-file, never fatal.
+	 * Enumerate {@code mods/<id>/scripts/items/*.lua} for each enabled mod and compile each in
+	 * the sandbox. Errors per-file, never fatal.
 	 *
-	 * <p>dofile is stripped from the sandbox (N2), so the host loads each item script
-	 * itself. Enumeration is two-stage: the classpath URL is checked first because
-	 * libgdx's headless/LWJGL3 {@code FileHandle.list()} cannot list an
-	 * {@code Internal} directory that only exists on the classpath (it returns an
-	 * empty array); when the classpath entry is a real filesystem directory (tests
-	 * and desktop dev runs) we list it directly. The libgdx fallback covers Android
-	 * {@code AssetManager.list} and packaged-jar runs.
+	 * <p>M5c: item scripts (like all Lua content) are scoped per mod. {@code ModRegistry.all()}
+	 * lazy-scans on first use; disabled mods are skipped so a disabled mod contributes zero Lua
+	 * content (C3 regression baseline — vanilla playthrough loads no Lua items).
+	 *
+	 * <p>dofile is stripped from the sandbox (N2), so the host loads each item script itself.
+	 * Enumeration is two-stage: the classpath URL is checked first because libgdx's headless/LWJGL3
+	 * {@code FileHandle.list()} cannot list an {@code Internal} directory that only exists on the
+	 * classpath (it returns an empty array); when the classpath entry is a real filesystem
+	 * directory (tests and desktop dev runs) we list it directly. The libgdx fallback covers
+	 * Android {@code AssetManager.list} and packaged-jar runs.
 	 */
 	private void loadItemScripts() {
-		loadScriptsFrom(ITEMS_DIR, "Lua items", LuaItemRegistry::size);
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/items", "Lua items (" + mod.id + ")", LuaItemRegistry::size);
+		}
 	}
 
 	/**
-	 * M3a: enumerate {@code scripts/mobs/*.lua} and compile each. Same host-side
-	 * enumeration + two-stage listing as items (dofile is stripped from the
-	 * sandbox). Lua mobs are not part of the vanilla spawn pool — they only enter
-	 * a level via {@code RPD.spawnMob}.
+	 * M3a: enumerate {@code mods/<id>/scripts/mobs/*.lua} for each enabled mod and compile each.
+	 * Same enabled-mod iteration + two-stage listing as items (M5c). Lua mobs are not part of the
+	 * vanilla spawn pool — they only enter a level via {@code RPD.spawnMob}.
 	 */
 	private void loadMobScripts() {
-		loadScriptsFrom(MOBS_DIR, "Lua mobs", LuaMobRegistry::size);
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/mobs", "Lua mobs (" + mod.id + ")", LuaMobRegistry::size);
+		}
 	}
 
 	/**
-	 * M3b: enumerate {@code scripts/allies/*.lua} and compile each. Same host-side
-	 * enumeration + two-stage listing as items/mobs (dofile is stripped from the
-	 * sandbox). Lua allies are not part of the vanilla spawn pool — they only
-	 * enter a level via {@code RPD.spawnAlly}.
+	 * M3b: enumerate {@code mods/<id>/scripts/allies/*.lua} for each enabled mod and compile each.
+	 * Same enabled-mod iteration + two-stage listing as items/mobs (M5c). Lua allies are not part
+	 * of the vanilla spawn pool — they only enter a level via {@code RPD.spawnAlly}.
 	 */
 	private void loadAllyScripts() {
-		loadScriptsFrom(ALLIES_DIR, "Lua allies", LuaAllyRegistry::size);
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/allies", "Lua allies (" + mod.id + ")", LuaAllyRegistry::size);
+		}
 	}
 
 	/**
-	 * M3c: enumerate {@code scripts/heroes/*.lua} and compile each. Same host-side
-	 * enumeration + two-stage listing as items/mobs/allies (dofile is stripped
-	 * from the sandbox). Lua heroes are not part of the vanilla
-	 * {@code HeroClass.values()} roster — {@code HeroSelectScene} renders them as
-	 * extra buttons and {@code Dungeon.init} routes to {@code Hero.initLuaHero}
-	 * via {@link LuaHeroService} when one is selected.
+	 * M3c: enumerate {@code mods/<id>/scripts/heroes/*.lua} for each enabled mod and compile each.
+	 * Same enabled-mod iteration + two-stage listing as items/mobs/allies (M5c). Lua heroes are
+	 * not part of the vanilla {@code HeroClass.values()} roster — {@code HeroSelectScene} renders
+	 * them as extra buttons and {@code Dungeon.init} routes to {@code Hero.initLuaHero} via
+	 * {@link LuaHeroService} when one is selected.
 	 */
 	private void loadHeroScripts() {
-		loadScriptsFrom(HEROES_DIR, "Lua heroes", LuaHeroRegistry::size);
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/heroes", "Lua heroes (" + mod.id + ")", LuaHeroRegistry::size);
+		}
 	}
 
 	/**
-	 * M3d: enumerate {@code scripts/spells/*.lua} and compile each. Same host-side
-	 * enumeration + two-stage listing as items/mobs/allies/heroes (dofile is
-	 * stripped from the sandbox). LuaSpell is not part of the vanilla loot pool
-	 * — scripts only define consumable behaviour; spawning them into inventory is
-	 * left to mod/cheat console or future milestones.
+	 * M3d: enumerate {@code mods/<id>/scripts/spells/*.lua} for each enabled mod and compile each.
+	 * Same enabled-mod iteration + two-stage listing as items/mobs/allies/heroes (M5c). LuaSpell
+	 * is not part of the vanilla loot pool — scripts only define consumable behaviour; spawning
+	 * them into inventory is left to mod/cheat console or future milestones.
 	 */
 	private void loadSpellScripts() {
-		loadScriptsFrom(SPELLS_DIR, "Lua spells", LuaSpellRegistry::size);
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/spells", "Lua spells (" + mod.id + ")", LuaSpellRegistry::size);
+		}
 	}
 
 	/**
-	 * M4b: enumerate {@code scripts/npcs/*.lua} and compile each. Same host-side
-	 * enumeration + two-stage listing as items/mobs/allies/heroes/spells (dofile
-	 * is stripped from the sandbox). Lua NPCs are not part of the vanilla spawn
-	 * pool — they only enter a level via a {@code lua_npc:<id>} entry in a
-	 * {@link DataDrivenLevel} mob spec.
+	 * M4b: enumerate {@code mods/<id>/scripts/npcs/*.lua} for each enabled mod and compile each.
+	 * Same enabled-mod iteration + two-stage listing as the other registries (M5c). Lua NPCs are
+	 * not part of the vanilla spawn pool — they only enter a level via a {@code lua_npc:<id>}
+	 * entry in a {@link DataDrivenLevel} mob spec.
 	 */
 	private void loadNpcScripts() {
-		loadScriptsFrom(NPCS_DIR, "Lua npcs", LuaNpcRegistry::size);
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/npcs", "Lua npcs (" + mod.id + ")", LuaNpcRegistry::size);
+		}
 	}
 
 	/**
-	 * M4c: enumerate {@code scripts/shops/*.lua} and compile each. Same host-side
-	 * enumeration + two-stage listing as the other registries (dofile is stripped
-	 * from the sandbox). Lua shops are not part of the vanilla spawn pool — they
-	 * only enter a level via a {@code lua_shop:<id>} entry in a
-	 * {@link DataDrivenLevel} mob spec.
+	 * M4c: enumerate {@code mods/<id>/scripts/shops/*.lua} for each enabled mod and compile each.
+	 * Same enabled-mod iteration + two-stage listing as the other registries (M5c). Lua shops are
+	 * not part of the vanilla spawn pool — they only enter a level via a {@code lua_shop:<id>}
+	 * entry in a {@link DataDrivenLevel} mob spec.
 	 */
 	private void loadShopScripts() {
-		loadScriptsFrom(SHOPS_DIR, "Lua shops", LuaShopRegistry::size);
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/shops", "Lua shops (" + mod.id + ")", LuaShopRegistry::size);
+		}
 	}
 
 	/**
