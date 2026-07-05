@@ -313,6 +313,9 @@ public abstract class RegularLevel extends Level {
 
 		}
 
+		// FORK(modding-M4d): inject Lua-defined town-portal NPCs (debug-gated, depth-routed).
+		com.shatteredpixel.shatteredpixeldungeon.modding.LuaLevelService.injectLevelNpcs(this);
+
 	}
 
 	@Override

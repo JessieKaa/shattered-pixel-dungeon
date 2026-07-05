@@ -276,6 +276,10 @@
     {
       "type": "lua_shop:test_shop",
       "pos": 120
+    },
+    {
+      "type": "lua_npc:town_return",
+      "pos": 18
     }
   ],
   "items": [

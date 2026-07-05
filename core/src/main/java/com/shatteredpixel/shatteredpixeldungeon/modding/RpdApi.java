@@ -91,6 +91,11 @@ final class RpdApi {
         // fires from the actor thread). Both take an int charId and validate it.
         rpd.set("npcYell", new NpcYell());
         rpd.set("showDialog", new ShowDialog());
+        // M4d: town-portal bridge. enterTown/leaveTown delegate to LuaLevelService
+        // on the render thread (onInteract fires on the actor thread; switchScene
+        // must run on render). Both are debug-gated inside LuaLevelService.
+        rpd.set("enterTown", new EnterTown());
+        rpd.set("leaveTown", new LeaveTown());
         return rpd;
     }
 
@@ -418,6 +423,50 @@ final class RpdApi {
                 Game.runOnRenderThread(() -> GameScene.show(new WndMessage(body)));
             } catch (Exception e) {
                 Gdx.app.error(TAG, "showDialog threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * {@code RPD.enterTown(levelId)} — swap the live level for the named JSON level
+     * (M4d). Delegates to {@link LuaLevelService#enterLevel} on the render thread:
+     * {@code onInteract} fires on the actor thread, but the level build + scene
+     * switch must run on render. The {@code levelId} must match a
+     * {@code mods/levels/<id>.json} asset. {@link LuaLevelService#enterLevel} is
+     * debug-gated and validates hero/level-state itself; this wrapper only
+     * forwards. Silently logs + returns NIL on a non-string id (never throws).
+     */
+    private static final class EnterTown extends OneArgFunction {
+        @Override public LuaValue call(LuaValue levelId) {
+            try {
+                if (!levelId.isstring()) {
+                    Gdx.app.error(TAG, "enterTown expected string levelId, got " + levelId.typename());
+                    return NIL;
+                }
+                String id = levelId.checkjstring();
+                Game.runOnRenderThread(() -> LuaLevelService.enterLevel(id));
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "enterTown threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * {@code RPD.leaveTown()} — leave the JSON level and return to the main run,
+     * preserving hero in-memory state (M4d, R4). Delegates to
+     * {@link LuaLevelService#leaveLevel} on the render thread. Any argument is
+     * ignored (Lua {@code RPD.leaveTown()} is conventionally nil-arg; tolerating
+     * a stray arg costs nothing and avoids a hard failure if a scripter writes
+     * {@code RPD.leaveTown(nil)}).
+     */
+    private static final class LeaveTown extends OneArgFunction {
+        @Override public LuaValue call(LuaValue ignored) {
+            try {
+                Game.runOnRenderThread(LuaLevelService::leaveLevel);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "leaveTown threw", e);
             }
             return NIL;
         }
