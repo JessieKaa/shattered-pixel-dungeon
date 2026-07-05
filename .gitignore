@@ -12,9 +12,18 @@
 build/
 release/
 
+# JUnit TemporaryFolder artifacts (gradle daemon doesn't exit, so cleanup hooks don't fire)
+core/tmp/
+
 # Local configuration file (sdk path, etc)
 local.properties
+
+# Fork: local release keystore config (contains path to test keystore)
+android/keystore.properties
 
 #intellij project files
 *.iml
 *.idea
+
+# Save editor: downloaded test artifacts
+new.zip

@@ -51,11 +51,39 @@ import com.watabou.input.KeyEvent;
 import com.watabou.noosa.Game;
 import com.watabou.utils.FileUtils;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class AndroidLauncher extends AndroidApplication {
-	
+
 	public static AndroidApplication instance;
-	
+
 	private static AndroidPlatformSupport support;
+
+	/**
+	 * Fork extension: per-request-code Activity result router used by
+	 * {@link AndroidSaveSlotBridge} for SAF pickers.
+	 */
+	public interface ActivityResultHandler {
+		void onResult(int resultCode, Intent data);
+	}
+
+	private final Map<Integer, ActivityResultHandler> activityResultHandlers = new HashMap<>();
+
+	public void registerActivityResult(int requestCode, ActivityResultHandler handler) {
+		activityResultHandlers.put(requestCode, handler);
+	}
+
+	public void unregisterActivityResult(int requestCode) {
+		activityResultHandlers.remove(requestCode);
+	}
+
+	@Override
+	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+		super.onActivityResult(requestCode, resultCode, data);
+		ActivityResultHandler h = activityResultHandlers.remove(requestCode);
+		if (h != null) h.onResult(resultCode, data);
+	}
 	
 	@SuppressLint("SetTextI18n")
 	@Override

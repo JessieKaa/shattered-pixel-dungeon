@@ -32,6 +32,7 @@ import com.watabou.input.ControllerHandler;
 import com.watabou.noosa.Game;
 import com.watabou.utils.PlatformSupport;
 import com.watabou.utils.Point;
+import com.watabou.utils.SaveSlotBridge;
 
 import java.util.HashMap;
 import java.util.regex.Matcher;
@@ -172,5 +173,11 @@ public class DesktopPlatformSupport extends PlatformSupport {
 		} else {
 			return regularsplitter.split(text);
 		}
+	}
+
+	// Fork extension: provide a JFileChooser-backed save-slot export/import bridge.
+	@Override
+	public SaveSlotBridge saveSlotBridge() {
+		return new DesktopSaveSlotBridge();
 	}
 }

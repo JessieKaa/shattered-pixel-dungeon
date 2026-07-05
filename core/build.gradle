@@ -3,7 +3,25 @@ apply plugin: 'java-library'
 [compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
 java.sourceCompatibility = java.targetCompatibility = appJavaCompatibility
 
+// Expose the assets directory (where libgdx Messages bundles live) to the
+// headless test runtime so Gdx.files.internal(...) can find them.
+sourceSets {
+    test {
+        resources.srcDirs = ['src/test/resources', 'src/main/assets']
+    }
+}
+
 dependencies {
     api project(':SPD-classes')
     implementation project(':services')
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation "com.badlogicgames.gdx:gdx-backend-headless:$gdxVersion"
+    testImplementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+}
+
+test {
+    useJUnit()
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'spd.appVersionCode', appVersionCode
 }

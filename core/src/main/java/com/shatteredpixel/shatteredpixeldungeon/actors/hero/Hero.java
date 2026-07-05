@@ -163,6 +163,7 @@ import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.AlchemyScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
+import com.shatteredpixel.shatteredpixeldungeon.saveslot.SaveSlotService;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.CharSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.HeroSprite;
 import com.shatteredpixel.shatteredpixeldungeon.ui.AttackIndicator;
@@ -1761,6 +1762,10 @@ public class Hero extends Char {
 	}
 	
 	private boolean walkingToVisibleTrapInFog = false;
+
+	// Fork extension: 防止死亡读档对话框死循环。每个 Hero 实例只提示一次。
+	// 读档成功会重建 Hero(saveSlotPrompted 重置为 false),取消则继续原 die 流程。
+	public transient boolean saveSlotPrompted = false;
 	
 	private boolean getCloser( final int target ) {
 
@@ -2126,8 +2131,12 @@ public class Hero extends Char {
 
 	@Override
 	public void die( Object cause ) {
-		
+
 		curAction = null;
+
+		// --- Fork: save slot death reload (recursive re-entry on cancel) ---
+		if (SaveSlotService.interceptDeath(this, cause)) return;
+		// --- Fork end ---
 
 		Ankh ankh = null;
 
