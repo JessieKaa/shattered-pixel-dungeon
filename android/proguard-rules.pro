@@ -59,3 +59,8 @@
 -keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo { *; }
 -keep class com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Haste { *; }
 -keep class com.shatteredpixel.shatteredpixeldungeon.modding.** { *; }
+
+# M3a Lua mob pipeline: LuaMob (extends Mob → Bundlable) is restored via
+# Reflection.newInstance, and LuaMobRegistry/RpdApi are reached from Lua.
+# Already covered by the modding.** rule above and the Bundlable rule; this
+# comment documents the dependency.

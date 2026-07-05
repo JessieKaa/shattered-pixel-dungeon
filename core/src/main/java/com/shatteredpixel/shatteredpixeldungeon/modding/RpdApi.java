@@ -14,6 +14,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Poison;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Roots;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Slow;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
@@ -70,6 +71,10 @@ final class RpdApi {
         rpd.set("charHP", new CharHP());
         rpd.set("charPos", new CharPos());
         rpd.set("charName", new CharName());
+        // M3a: spawnMob injects a Lua-defined hostile mob at GameScene.add level,
+        // bypassing Level.createMob/MobSpawner/mobsToSpawn (C3/C4: vanilla spawn
+        // balance untouched). The mob is not part of the rotation pool.
+        rpd.set("spawnMob", new SpawnMob());
         return rpd;
     }
 
@@ -178,6 +183,45 @@ final class RpdApi {
         @Override public LuaValue call(LuaValue charId) {
             Char c = resolveChar(charId);
             return c == null ? NIL : LuaValue.valueOf(c.name());
+        }
+    }
+
+    /**
+     * {@code RPD.spawnMob(mobId, pos)} — inject a Lua-defined hostile mob at the
+     * {@link GameScene#add(Mob)} level. This is the same registration point the
+     * vanilla spawner reaches via {@code Level.spawnMob} (Level.java:756), but it
+     * <b>does not</b> call {@code Level.createMob}, touch {@code mobsToSpawn}, or
+     * go through {@code MobSpawner} — so the rotation pool and per-level spawn
+     * balance are untouched (C3/C4). Lua mobs only appear when a script summons
+     * them. Returns NIL on any bad input; logs but never throws.
+     */
+    private static final class SpawnMob extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue mobId, LuaValue pos) {
+            try {
+                if (!mobId.isstring()) {
+                    Gdx.app.error(TAG, "spawnMob expected string mobId, got " + mobId.typename());
+                    return NIL;
+                }
+                String id = mobId.checkjstring();
+                if (!LuaMobRegistry.contains(id)) {
+                    Gdx.app.error(TAG, "spawnMob: unknown mob id '" + id + "'");
+                    return NIL;
+                }
+                if (!pos.isint()) {
+                    Gdx.app.error(TAG, "spawnMob expected int pos, got " + pos.typename());
+                    return NIL;
+                }
+                LuaMob mob = LuaMobRegistry.create(id);
+                if (mob == null) return NIL;
+                mob.pos = pos.toint();
+                // Note: GameScene.add handles Dungeon.level.mobs registration,
+                // sprite setup, Actor.addDelayed and spendToWhole. It does NOT
+                // route through Level.createMob — verified by grep (C3/C4).
+                GameScene.add(mob);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "spawnMob threw", e);
+            }
+            return NIL;
         }
     }
 
