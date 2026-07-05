@@ -64,3 +64,8 @@
 # Reflection.newInstance, and LuaMobRegistry/RpdApi are reached from Lua.
 # Already covered by the modding.** rule above and the Bundlable rule; this
 # comment documents the dependency.
+
+# M4a DataDrivenLevel (extends Level → Bundlable) round-trips through Bundle and is
+# referenced by LuaLevelService/LuaDebugService. No new rule needed: the modding.**
+# keepnames rule above plus the broad `-keep class * implements Bundlable` both retain
+# it. This comment documents the dependency (C5).
