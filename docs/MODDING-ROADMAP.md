@@ -124,7 +124,7 @@
 
 ### M4 — 关卡 / 城镇 / 广度内容
 
-- **状态**: `[~]` 进行中(m4a-data-driven-level worker e270fc17;计划拆 m4a Level / m4b 图 / m4c 城镇 / m4d 多店)
+- **状态**: `[~]` 核心三件套完成(M4a Level `ac5fa76f6` / M4b NPC `68ff41f25` / M4c shop `873753f92`,3 feature 合 master `873753f92`);**M4d 主线可达推迟到 M5**——M5 mod 治理前玩家不可达(等同 debug 入口),与玩家开关+接入一起做更合理
 - **目标**: 加广度容量(基础设施已铺好,本阶段主要是消费 API)
 - **范围**:
   - `levelsDesc/*.json` 图结构(线性 + 枢纽 + 副本)
@@ -173,7 +173,7 @@ M0 → M1 → M2 → [D1-D4 决策门] → M3 → M4 → M5
 | M1 沙箱 + 注册管线 | `[x]` | M0 | 中高 | 1(m1-sandbox) | @LuaInterface + processor + Generator 双源 |
 | M2 核心 API 暴露 | `[x]` | M1 | 高 | 1(m2-item-api) | 仅 Item API;关卡 API(Painter/Room)移到 M4 |
 | M3 深度系统 + 机制骨架 | `[x]` | M2 + D1-D4 | 极高 | 4(m3a-mob/m3b-pet/m3c-hero/m3d-spell) | D1 消耗性/D2 复用天赋/D3 ally/D4 保留硬编码 |
-| M4 关卡 / 城镇 / 广度 | `[~]` | M3 | 中 | 0/4(m4a-data-driven-level 进行中) | 拆 m4a Level/m4b 图/m4c 城镇/m4d 多店 |
+| M4 关卡 / 城镇 / 广度 | `[~]` | M3 | 中 | 3/4(M4a Level/M4b NPC/M4c shop 完成;M4d 可达推迟 M5) | 核心:数据驱动 Level + Lua NPC + 商店;主线可达并入 M5 |
 | M5 mod 治理 + 平衡 | `[ ]` | M4 | 中 | 3-4 | |
 | **合计(M0-M3 已完成)** | | | | **7** | |
 
@@ -195,3 +195,4 @@ M0 → M1 → M2 → [D1-D4 决策门] → M3 → M4 → M5
 |---|---|---|
 | 2026-07-05 | 初版路线图落盘 | dispatcher |
 | 2026-07-05 | M0-M3 完成(7 feature 合 master);M2 关卡 API(Painter/Room/Trap)移至 M4;M3 按 D1-D4 拆 m3a-mob/m3b-pet/m3c-hero/m3d-spell;M4 启动(m4a-data-driven-level 进行中) | dispatcher |
+| 2026-07-05 | M4 核心三件套完成(M4a Level `ac5fa76f6`/M4b NPC `68ff41f25`/M4c shop `873753f92`,3 feature 合 master `873753f92`,174 tests 全绿);**M4d 主线可达推迟到 M5**(玩家开关+接入一起做);M4 累计 10 feature(M0-M3 7 + M4 3) | dispatcher |
