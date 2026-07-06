@@ -127,3 +127,68 @@ enterLevel L121 后加 `Actor.clear()`(本 worktree 已 commit)。**保留**。
 - test_safezone.json(16×16,entrance=17,mobs: rat_king 136 / lua_npc:test_npc 102 / lua_shop:test_shop 120 / lua_npc:town_return 18)
 - M5c 目录化(test_mod default off → lua_npc/shop skip,DataDrivenLevel log "unknown id skipping",graceful)
 - modding 范式 + 约束 C1-C5 + CLAUDE.md
+
+## 调研结论(Worker Phase 1 定稿)
+
+### SPD padding 机制(澄清)
+
+- `Level.setSize(w,h)`(L319-345):`length = w*h`(**无 +1 padding**)。`map/visited/heroFOV/passable/losBlocking/solid/...` 全是 `new T[length]`。`PathFinder.setMapSize(w,h)` 同步,NEIGHBOURS9 = `{-w-1,-w,-w+1,-1,0,+1,+w-1,+w,+w+1}`。
+- 标准 SPD level 尺寸跨度大:`DeadEndLevel` 7×7、`LastLevel` 16×64、`PrisonBossLevel` 32×32、`DeadEndLevel` SIZE=5 内 EMPTY。**小 map 是 SPD 原生支持模式**,前提是布局正确(边缘 padding + entrance 不触绝对边缘)。
+- `Level.cleanWalls()`(L921-939)遍历 NEIGHBOURS9 **有** bounds(`n >= 0 && n < length()`)→ `discoverable[]` 任意尺寸安全初始化。
+
+### Bug 1 越界点全清单 + 根因再判定
+
+1. `Dungeon.observe` L955-957 `visited[hero.pos+i]` for NEIGHBOURS9 —— **无 bounds**。hero 在边缘(pos < width 顶行 / pos%width==0 左列 / 底行 / 右列)→ `pos+i` 可 <0 或 >=length。
+2. `WallBlockingTilemap.updateMapCell(cell)`(L68-192)大量 `wall(cell±mapWidth)`、`wall(cell±1±mapWidth)`、`fogHidden(cell±mapWidth)`,而 `wall(cell)`=`map[cell]`、`fogHidden(cell)`=`visited[cell]` **均无 bounds**。底行 cell(`cell+mapWidth >= length`)越界。
+   - 缓解:`updateMap()` 全量(L50-60)把顶行(`cell-mapWidth<=0`)/底行(`cell+mapWidth>=size`)设 CLEARED → 不进 updateMapCell。但 `updateArea(x,y,w,h)`(L229-237,observe→`GameScene.updateFog` 增量路径)的 `data[cell]!=CLEARED` guard 依赖 updateMap 先跑过;边缘 cell / 首帧仍可能进 updateMapCell → 越界。
+3. `BArray.or(visited, heroFOV, pos, width, visited)`(observe L950)—— pos 起点 `l + t*width`,l/t/width 全 clamp(L939-942)→ **bounded**。
+4. `GameScene.updateFog(l,t,w,h)`(L1425-1429)→ `wallBlocking.updateArea(x,y,w,h)` + `fog.updateFogArea` —— 见 #2。
+5. `GameScene.updateFog(cell,radius)`(L1432-1435)→ `wallBlocking.updateArea(cell,radius)`(L216-227 内部 clamp 后仍转 #2)。
+
+**实机 stacktrace `wall index=269`(row=16 越界)+ `findPassable index=284/902` 都是 Bug 0 主线 mob 大 pos 残留触发**(主线 level 大,mob pos 是主线坐标,进 SafeZone 256-cell map 越界)。**Bug 0 修后,hero 在 entrance=17(16×16,坐标(1,1))初始 observe NEIGHBOURS9 = [0..34]、tilemap 访问全合法 —— 初始进入不崩**。
+
+**但 16×16 活动区(col/row 1..14)距边缘仅 1 格**:玩家向下/左走 1 步即触顶行/左列 → NEIGHBOURS9 越界 / `wall(cell+mapWidth)` 越界。16×16 是"能进不能动"。这就是 X1 的根治价值。
+
+### 选型定稿:X1(改 32×32),否定 X2/X3
+
+- **X1 采用**:test_safezone.json 改 32×32,外围 8 格全 wall,现有 16×16 内容居中到 (8..23)×(8..23)。hero 活动区(col/row 8..23)距绝对边缘 ≥8,NEIGHBOURS9 与 SafeZone 内走动的增量 fog/tilemap 更新都有 padding。observe/tilemap 完整渲染仍留实机验证。
+- **X2 否定**:`Dungeon.observe`/`WallBlockingTilemap` 是上游(C2/C4 硬约束 0 上游改动),fork 不易 override;且 X1 让所有 cell 访问合法,无需 bounds 保护。`DataDrivenLevel` 也无需改:`buildFlagMaps`/`cleanWalls` 已 bounded,`createMobs` pos 校验已有 `pos >= 0 && pos < length() && passable[pos]`。
+- **X3 否定**:X1 已根治,X2 多余。
+- **0 fork Java 改动**(纯 JSON + 新测试)。Bug 0 的 `Actor.clear()` 已 commit(LuaLevelService,本 worktree)。
+
+### pos 重算表(16×16 → 32×32,内容偏移 (+8,+8),新 width=32)
+
+| 项 | 旧 pos | 旧(col,row) | 新(col,row) | 新 pos | 新 tile |
+|---|---|---|---|---|---|
+| entrance | 17 | (1,1) | (9,9) | **297** | entrance |
+| exit | 238 | (14,14) | (22,22) | **726** | exit |
+| rat_king | 136 | (8,8) | (16,16) | **528** | floor |
+| lua_npc:test_npc | 102 | (6,6) | (14,14) | **462** | floor |
+| lua_shop:test_shop | 120 | (8,7) | (16,15) | **496** | floor |
+| lua_npc:town_return | 18 | (2,1) | (10,9) | **298** | floor(与 entrance 相邻,语义保持) |
+| gold(item) | 90 | (10,5) | (18,13) | **434** | floor |
+
+新 pos 全在 [0,1024),col/row 全在 [8,23] → 距边缘 ≥8,passable(floor)。tiles 生成:32×32=1024,外围(row<8 或 row>23 或 col<8 或 col>23)全 `wall`,中心 16×16((8..23)×(8..23))放原 test_safezone 16×16 tiles(顶行全 wall、entrance 在 (9,9)、exit 在 (22,22)、其余 floor)。
+
+### 测试影响(澄清 supervisor message)
+
+- **无任何测试 `fromAsset` 读 test_safezone.json 文件**(全 grep 确认:`fromAsset`/`test_safezone.json` 在 `core/src/test/` 零命中)。`DataDrivenLevelTest` 用内嵌 `sampleJson()`(16×16,独立);`LuaLevelInjectTest` 用 `newStubLevel`(5×5/7×7);`LuaNpcTest`/`LuaShopTest` 不引用 test_safezone;`ModScannerTest` 只检查 "test_safezone" 不在 mod ids。
+- **改 JSON 不影响现有 216 测试**。supervisor message 的"同步改 M4b/c/d 测试 pos"基于误判 —— 实际无需改测试 pos。
+- `DataDrivenLevelTest` 内嵌 sampleJson 仍 16×16(测 parse 正确性)—— **保留不动**(它正好佐证 16×16 parse/build 正常,Bug 在 SPD tilemap/observe runtime 而非 DataDrivenLevel)。
+
+### Bug 2 防御:不加(YAGNI)
+
+Bug 0(已修)+ Bug 1(X1)修后,observe 不越界 → switchLevel 不抛 → enterLevel 不进 catch。现有 catch(LuaLevelService L132-136 LOG only)足够。加事务性回滚(prevLevel 保存 + Actor.clear/重建)复杂且难 headless 测(要 mock switchLevel 抛异常),YAGNI。**codex 评审确认此判断**。
+
+### Bug 3:不直接修(Bug 1+2 修后自解)
+
+Bug 1 修后 switchLevel 完整执行 → `Game.switchScene(GameScene)` 起来 → RatKing sprite 建立 → `Mob.act` 不 NPE。
+
+### SafeZoneEnterTest 覆盖(headless,新增)
+
+- `DataDrivenLevel.fromAsset("mods/levels/test_safezone.json","test_safezone")` 非 null
+- `create()` 成功;`width()/height()/length()` = 32/32/1024
+- `entrance()`=297、mobs pos(rat_king 528 等)全在 [0,1024) 且 `passable[pos]`
+- `cleanWalls()`(discoverable 初始化)不抛
+- 模拟 observe 核心:hero 在 entrance(297)+ 活动区四边缘(col=8/23、row=8/23 各取代表点)的 `hero.pos + PathFinder.NEIGHBOURS9[i]` 全在 [0,1024)
+- tilemap 渲染 headless 测不到,留实机(supervisor 设备 20210119085654)
