@@ -128,4 +128,32 @@ public class GeneratorLuaItemTest {
                         + "weighted category (got " + luaHits + "/20)",
                 luaHits >= 15);
     }
+
+    /**
+     * M6e balance #5: the default {@link LuaItemPool#random()} (the path
+     * {@code Generator.random(LUA_ITEM)} takes) must skip material-typed ids so a
+     * crafting component never drops from a weapon-shaped roll. Materials and
+     * weapons no longer share a pool.
+     */
+    @Test
+    public void defaultPoolExcludesMaterials() {
+        LuaEngine.init();
+        // Sanity: the test_mod registry actually carries both shapes.
+        assertTrue("rotten_organ must be registered as a material",
+                LuaItemRegistry.isMaterial("rotten_organ"));
+        assertFalse("test_sword must not be a material",
+                LuaItemRegistry.isMaterial("test_sword"));
+
+        for (int i = 0; i < 50; i++) {
+            Item item = LuaItemPool.random();
+            assertNotNull(item);
+            assertFalse("default random() must not emit a material (got " + item.getClass().getSimpleName() + ")",
+                    item instanceof LuaMaterial);
+        }
+
+        // The material-only entry point does the inverse.
+        Item mat = LuaItemPool.randomMaterial();
+        assertNotNull("randomMaterial() must return a material when registered", mat);
+        assertTrue("randomMaterial() must emit a LuaMaterial", mat instanceof LuaMaterial);
+    }
 }
