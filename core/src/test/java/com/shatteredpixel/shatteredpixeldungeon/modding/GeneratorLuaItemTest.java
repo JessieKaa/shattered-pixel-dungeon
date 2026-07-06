@@ -13,6 +13,7 @@ import com.badlogic.gdx.backends.headless.HeadlessApplicationConfiguration;
 import com.watabou.noosa.Game;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -73,9 +74,14 @@ public class GeneratorLuaItemTest {
         assertNotNull(item);
         assertTrue("Generator.random(LUA_ITEM) must return a LuaItem, got " + item.getClass().getSimpleName(),
                 item instanceof LuaItem);
-        // Name comes from one of the Lua definitions (all carry the "(Lua)" marker).
-        assertTrue("name should come from a Lua script: " + item.name(),
-                item.name().contains("(Lua)"));
+        // The Lua table's name hydrated (non-empty, and not the degraded "???" LuaItem uses
+        // when its registry entry is missing). The instanceof check above is the main contract;
+        // we deliberately do NOT require a "(Lua)" substring — M6-fast C-path data skins carry
+        // real translated names (e.g. "腐烂器官") without that debug marker, and the pool draws
+        // from the whole registry, so a marker-based assertion would flake.
+        assertNotNull(item.name());
+        assertFalse("name must hydrate from Lua, not stay degraded: " + item.name(),
+                item.name().startsWith("???"));
     }
 
     @Test
