@@ -1,5 +1,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
+import com.badlogic.gdx.Gdx;
+import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import org.luaj.vm2.LuaTable;
 
 import java.util.HashMap;
@@ -15,6 +17,7 @@ import java.util.Map;
  */
 public final class LuaItemRegistry {
 
+	private static final String TAG = "LuaItemRegistry";
 	private static final Map<String, LuaTable> items = new HashMap<>();
 
 	private LuaItemRegistry() { }
@@ -33,9 +36,37 @@ public final class LuaItemRegistry {
 	}
 
 	public static LuaItem create(String id) {
+		return createWeapon(id);
+	}
+
+	/**
+	 * Weapon-only legacy entry: returns a {@link LuaItem} for non-material ids.
+	 * Material ids return null + a logged rejection, so legacy callers cannot
+	 * accidentally swallow a material as a MeleeWeapon (M6d structural fix).
+	 */
+	public static LuaItem createWeapon(String id) {
 		LuaTable tbl = items.get(id);
 		if (tbl == null) return null;
+		if (isMaterial(tbl)) {
+			Gdx.app.error(TAG, "createWeapon('" + id + "'): id is a material, use createItem() instead");
+			return null;
+		}
 		return new LuaItem(tbl);
+	}
+
+	/**
+	 * Typed dispatch entry for the API/Generator paths. Material ids build a
+	 * {@link LuaMaterial}; everything else builds the weapon {@link LuaItem}.
+	 */
+	public static Item createItem(String id) {
+		LuaTable tbl = items.get(id);
+		if (tbl == null) return null;
+		return isMaterial(tbl) ? new LuaMaterial(tbl) : new LuaItem(tbl);
+	}
+
+	private static boolean isMaterial(LuaTable tbl) {
+		String kind = tbl.get("type").optjstring(tbl.get("kind").optjstring(""));
+		return kind.equalsIgnoreCase("material");
 	}
 
 	public static boolean contains(String id) {

@@ -43,13 +43,19 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Speed;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vulnerable;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Weakness;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Belongings;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.npcs.NPC;
+import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfTeleportation;
+import com.shatteredpixel.shatteredpixeldungeon.mechanics.Ballistica;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndMessage;
 import com.watabou.noosa.Game;
+import com.watabou.utils.PathFinder;
+import com.watabou.utils.Random;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
 import org.luaj.vm2.lib.OneArgFunction;
@@ -149,6 +155,22 @@ final class RpdApi {
         rpd.set("permanentBuff", new PermanentBuff());
         rpd.set("setBuffLevel", new SetBuffLevel());
         rpd.set("buffLevel", new BuffLevel());
+        // M6d item/spell API: id/index/cell primitives for inventory + spells.
+        // No entry returns a Java object/userdata — giveItem returns bool,
+        // randomBackpackItem returns a 1-based index, itemName returns a string,
+        // cellRay returns a Lua array of ints. ScriptedThief loot is held in the
+        // Java-side Mob.loot field and dropped on death via createLoot().
+        rpd.set("giveItem", new GiveItem());
+        rpd.set("randomBackpackItem", new RandomBackpackItem());
+        rpd.set("itemName", new ItemName());
+        rpd.set("removeBackpackItem", new RemoveBackpackItem());
+        rpd.set("stealRandomItem", new StealRandomItem());
+        rpd.set("stolenLootName", new StolenLootName());
+        rpd.set("teleportChar", new TeleportChar());
+        rpd.set("charAtCell", new CharAtCell());
+        rpd.set("cellRay", new CellRay());
+        rpd.set("zapEffect", new ZapEffect());
+        rpd.set("spawnMobNear", new SpawnMobNear());
         return rpd;
     }
 
@@ -1027,5 +1049,304 @@ final class RpdApi {
         }
 
         private BuffWhitelist() { }
+    }
+
+    // ---- M6d item/spell API ----
+
+    private static Hero resolveHero(LuaValue idVal, String fnName) {
+        Char c = resolveChar(idVal);
+        if (c == null) return null;
+        if (!(c instanceof Hero)) {
+            Gdx.app.error(TAG, fnName + " only applies to the hero; rejected "
+                    + c.getClass().getSimpleName());
+            return null;
+        }
+        return (Hero) c;
+    }
+
+    private static boolean validQty(double qty) {
+        return qty > 0 && qty <= MAX_AMOUNT && !Double.isNaN(qty);
+    }
+
+    private static int qtyOf(LuaValue v) {
+        double q = v.isnumber() ? v.todouble() : -1;
+        return validQty(q) ? (int) q : -1;
+    }
+
+    /** {@code RPD.giveItem(charId, itemId, qty)} — create + collect into hero backpack. Returns bool. */
+    private static final class GiveItem extends ThreeArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue itemId, LuaValue qty) {
+            try {
+                Hero hero = resolveHero(charId, "giveItem");
+                if (hero == null) return NIL;
+                if (!itemId.isstring()) {
+                    Gdx.app.error(TAG, "giveItem expected string itemId, got " + itemId.typename());
+                    return NIL;
+                }
+                int n = qtyOf(qty);
+                if (n < 0) {
+                    Gdx.app.error(TAG, "giveItem rejected qty " + qty);
+                    return NIL;
+                }
+                Item item = LuaItemRegistry.createItem(itemId.checkjstring());
+                if (item == null) {
+                    Gdx.app.error(TAG, "giveItem: unknown item id '" + itemId.tojstring() + "'");
+                    return NIL;
+                }
+                item.quantity(n);
+                boolean ok = item.collect(hero.belongings.backpack);
+                return LuaValue.valueOf(ok);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "giveItem threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.randomBackpackItem(charId)} — uniform 1-based index of a backpack item, or nil. */
+    private static final class RandomBackpackItem extends OneArgFunction {
+        @Override public LuaValue call(LuaValue charId) {
+            try {
+                Hero hero = resolveHero(charId, "randomBackpackItem");
+                if (hero == null) return NIL;
+                java.util.List<Item> items = hero.belongings.backpack.items;
+                if (items.isEmpty()) return NIL;
+                int idx = Random.Int(items.size());
+                return LuaValue.valueOf(idx + 1);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "randomBackpackItem threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.itemName(charId, index)} — name of the backpack item at 1-based index, or nil. */
+    private static final class ItemName extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue index) {
+            try {
+                Hero hero = resolveHero(charId, "itemName");
+                if (hero == null) return NIL;
+                if (!index.isint()) {
+                    Gdx.app.error(TAG, "itemName expected int index, got " + index.typename());
+                    return NIL;
+                }
+                java.util.List<Item> items = hero.belongings.backpack.items;
+                int i = index.toint() - 1;
+                if (i < 0 || i >= items.size()) return NIL;
+                return LuaValue.valueOf(items.get(i).name());
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "itemName threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.removeBackpackItem(charId, index, qty)} — detach qty from item at 1-based index. Returns bool. */
+    private static final class RemoveBackpackItem extends ThreeArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue index, LuaValue qty) {
+            try {
+                Hero hero = resolveHero(charId, "removeBackpackItem");
+                if (hero == null) return NIL;
+                if (!index.isint()) {
+                    Gdx.app.error(TAG, "removeBackpackItem expected int index, got " + index.typename());
+                    return NIL;
+                }
+                int n = qtyOf(qty);
+                if (n < 0) {
+                    Gdx.app.error(TAG, "removeBackpackItem rejected qty " + qty);
+                    return NIL;
+                }
+                java.util.List<Item> items = hero.belongings.backpack.items;
+                int i = index.toint() - 1;
+                if (i < 0 || i >= items.size()) return NIL;
+                Item item = items.get(i);
+                for (int k = 0; k < n; k++) {
+                    if (item.quantity() <= 0) break;
+                    item.detach(hero.belongings.backpack);
+                }
+                return LuaValue.valueOf(true);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "removeBackpackItem threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /**
+     * {@code RPD.stealRandomItem(mobId, targetHeroId)} — detach one random backpack
+     * item from the hero and stash it on the mob's {@code loot} field so
+     * {@link Mob#createLoot()} drops it on death. Returns the stolen item name or
+     * nil. The Java side holds the {@link Item}; Lua never sees the object.
+     */
+    private static final class StealRandomItem extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue mobId, LuaValue targetHeroId) {
+            try {
+                LuaMob mob = resolveLuaMob(mobId, "stealRandomItem");
+                if (mob == null) return NIL;
+                Hero hero = resolveHero(targetHeroId, "stealRandomItem");
+                if (hero == null) return NIL;
+                java.util.List<Item> items = hero.belongings.backpack.items;
+                if (items.isEmpty()) return NIL;
+                Item stolen = items.get(Random.Int(items.size())).detach(hero.belongings.backpack);
+                if (stolen == null) return NIL;
+                mob.stolenLoot(stolen);
+                return LuaValue.valueOf(stolen.name());
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "stealRandomItem threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.stolenLootName(mobId)} — name of the item currently held as the mob's loot, or nil. */
+    private static final class StolenLootName extends OneArgFunction {
+        @Override public LuaValue call(LuaValue mobId) {
+            try {
+                LuaMob mob = resolveLuaMob(mobId, "stolenLootName");
+                if (mob == null) return NIL;
+                Item loot = mob.stolenLoot();
+                return loot == null ? NIL : LuaValue.valueOf(loot.name());
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "stolenLootName threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.teleportChar(charId, pos)} — ScrollOfTeleportation.appear; guards level/blocked cell. */
+    private static final class TeleportChar extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue pos) {
+            try {
+                Char c = resolveChar(charId);
+                if (c == null) return NIL;
+                if (Dungeon.level == null) {
+                    Gdx.app.error(TAG, "teleportChar no-op: Dungeon.level is null");
+                    return NIL;
+                }
+                if (!pos.isint()) {
+                    Gdx.app.error(TAG, "teleportChar expected int pos, got " + pos.typename());
+                    return NIL;
+                }
+                int cell = pos.toint();
+                if (!Dungeon.level.insideMap(cell) || !Dungeon.level.passable[cell]) {
+                    Gdx.app.error(TAG, "teleportChar rejected cell " + cell);
+                    return NIL;
+                }
+                ScrollOfTeleportation.appear(c, cell);
+                return LuaValue.valueOf(true);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "teleportChar threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.charAtCell(cell)} — live Char id at a cell, or nil. */
+    private static final class CharAtCell extends OneArgFunction {
+        @Override public LuaValue call(LuaValue cellVal) {
+            try {
+                if (!cellVal.isint()) {
+                    Gdx.app.error(TAG, "charAtCell expected int cell, got " + cellVal.typename());
+                    return NIL;
+                }
+                Char c = Actor.findChar(cellVal.toint());
+                return c == null ? NIL : LuaValue.valueOf(c.id());
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "charAtCell threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.cellRay(fromCell, toCell)} — int array of Ballistica PROJECTILE path cells, or nil. */
+    private static final class CellRay extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue fromCell, LuaValue toCell) {
+            try {
+                if (Dungeon.level == null) {
+                    Gdx.app.error(TAG, "cellRay no-op: Dungeon.level is null");
+                    return NIL;
+                }
+                if (!fromCell.isint() || !toCell.isint()) {
+                    Gdx.app.error(TAG, "cellRay expected int cells");
+                    return NIL;
+                }
+                int a = fromCell.toint();
+                int b = toCell.toint();
+                if (!Dungeon.level.insideMap(a) || !Dungeon.level.insideMap(b)) {
+                    Gdx.app.error(TAG, "cellRay rejected out-of-map cells " + a + ", " + b);
+                    return NIL;
+                }
+                Ballistica ray = new Ballistica(a, b, Ballistica.PROJECTILE);
+                LuaTable out = new LuaTable();
+                int i = 1;
+                for (int cell : ray.subPath(0, ray.dist)) {
+                    out.set(i++, LuaValue.valueOf(cell));
+                }
+                return out;
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "cellRay threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.zapEffect(fromCell, toCell)} — visual/logging hook placeholder; returns bool if cells are valid. */
+    private static final class ZapEffect extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue fromCell, LuaValue toCell) {
+            try {
+                if (Dungeon.level == null) {
+                    Gdx.app.error(TAG, "zapEffect no-op: Dungeon.level is null");
+                    return NIL;
+                }
+                if (!fromCell.isint() || !toCell.isint()) {
+                    Gdx.app.error(TAG, "zapEffect expected int cells");
+                    return NIL;
+                }
+                int a = fromCell.toint();
+                int b = toCell.toint();
+                if (!Dungeon.level.insideMap(a) || !Dungeon.level.insideMap(b)) {
+                    Gdx.app.error(TAG, "zapEffect rejected out-of-map cells " + a + ", " + b);
+                    return NIL;
+                }
+                return LuaValue.valueOf(true);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "zapEffect threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.spawnMobNear(mobId, centerCell)} — spawn a LuaMob at an empty neighbour cell. Returns char id or nil. */
+    private static final class SpawnMobNear extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue mobId, LuaValue centerCell) {
+            try {
+                if (!mobId.isstring()) {
+                    Gdx.app.error(TAG, "spawnMobNear expected string mobId, got " + mobId.typename());
+                    return NIL;
+                }
+                String id = mobId.checkjstring();
+                if (!LuaMobRegistry.contains(id)) {
+                    Gdx.app.error(TAG, "spawnMobNear: unknown mob id '" + id + "'");
+                    return NIL;
+                }
+                if (!centerCell.isint()) {
+                    Gdx.app.error(TAG, "spawnMobNear expected int cell, got " + centerCell.typename());
+                    return NIL;
+                }
+                int cell = LuaMob.findEmptyNextTo(centerCell.toint());
+                if (cell < 0) {
+                    Gdx.app.error(TAG, "spawnMobNear: no empty cell near " + centerCell.toint());
+                    return NIL;
+                }
+                LuaMob mob = LuaMobRegistry.create(id);
+                if (mob == null) return NIL;
+                mob.pos = cell;
+                GameScene.add(mob);
+                return LuaValue.valueOf(mob.id());
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "spawnMobNear threw", e);
+                return NIL;
+            }
+        }
     }
 }

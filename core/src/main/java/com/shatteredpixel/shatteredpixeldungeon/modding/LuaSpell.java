@@ -52,6 +52,9 @@ public class LuaSpell extends Item {
 	private String luaSpellId;
 	private String nameStr = "???";
 	private String descStr = "";
+	private float castTime = TIME_TO_USE;
+	private int spellCost = 0;
+	private String targeting = "self";
 
 	{
 		stackable = true;
@@ -73,6 +76,13 @@ public class LuaSpell extends Item {
 		nameStr = tbl.get("name").checkjstring();
 		descStr = tbl.get("desc").optjstring("");
 		image = tbl.get("image").optint(0);
+		// M6d: optional Remished-style metadata. Cast time overrides the default
+		// 1f spend; spellCost/targeting are stored for future UI and do not affect
+		// consumption. Restored via the same Lua table after save/load (the table
+		// is the source of truth, never the bundle).
+		castTime = (float) tbl.get("castTime").optdouble(TIME_TO_USE);
+		spellCost = tbl.get("spellCost").optint(0);
+		targeting = tbl.get("targeting").optjstring("self");
 	}
 
 	private LuaTable luaTable() {
@@ -99,7 +109,7 @@ public class LuaSpell extends Item {
 			if (tbl != null) {
 				LuaItemCallbacks.callOpt(tbl, "onUse", LuaValue.valueOf(hero.id()));
 			}
-			hero.spend(TIME_TO_USE);
+			hero.spend(castTime);
 			hero.busy();
 		}
 	}
@@ -130,6 +140,18 @@ public class LuaSpell extends Item {
 	@LuaInterface
 	public String desc() {
 		return descStr;
+	}
+
+	public float castTime() {
+		return castTime;
+	}
+
+	public int spellCost() {
+		return spellCost;
+	}
+
+	public String targeting() {
+		return targeting;
 	}
 
 	@Override

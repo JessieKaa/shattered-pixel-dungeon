@@ -3,13 +3,15 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.backends.headless.HeadlessApplication;
 import com.badlogic.gdx.backends.headless.HeadlessApplicationConfiguration;
+import com.shatteredpixel.shatteredpixeldungeon.items.Item;
+import com.shatteredpixel.shatteredpixeldungeon.items.bags.Bag;
 import com.shatteredpixel.shatteredpixeldungeon.items.weapon.melee.MeleeWeapon;
 import com.watabou.noosa.Game;
+import com.watabou.utils.Bundle;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.luaj.vm2.Globals;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -17,27 +19,27 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * M6-fast C 路径数据皮验证:Remished 纯数据材料 item(RottenOrgan / BoneShard /
- * ToxicGland)改写成 {@code register_item} 后,能否在 SPD 内 register + create,
- * 且数据字段(name/desc/tier/image)hydrate 正确。
+ * M6d material item coverage. M6-fast shipped these three Remished materials
+ * (RottenOrgan / BoneShard / ToxicGland) as weapon reskins — a structural
+ * mismatch where a "material" was actually a {@link MeleeWeapon}. M6d adds a
+ * real {@link LuaMaterial} (plain {@link Item}) and dispatches via
+ * {@link LuaItemRegistry#createItem}.
  *
- * <p>同时锁定两条 C 路径局限(见 {@code docs/PLAN-modding-m6-fast-data-skin.md}
- * 「结构性错配」),防回归:
+ * <p>Pinned down here:
  * <ol>
- *   <li>{@code price} / {@code stackable} 在 register_item table 里填了,但
- *       {@link LuaItem} hydrate 不读 —— 必须静默忽略(不抛错),且 stackable 保持
- *       false(材料语义丢失)。这是 C 路径头号成本,非 bug。</li>
- *   <li>套 {@link LuaItem}(extends {@link MeleeWeapon})wrapper 的"材料"实际是武器,
- *       进武器槽、走 tier-based 公式 —— 类型错配记为已知局限。</li>
+ *   <li>All three materials register and hydrate via {@link LuaMaterial}.</li>
+ *   <li>{@link LuaMaterial} is NOT a {@link MeleeWeapon} (the M6d fix).</li>
+ *   <li>stackable / price / value now take effect (M6-fast ignored them).</li>
+ *   <li>{@code createWeapon} rejects a material id instead of swallowing it.</li>
+ *   <li>Bundle restore preserves a non-default saved quantity — the script
+ *   default never overwrites it (codex plan round-1 must-fix).</li>
  * </ol>
- *
- * <p>mod 关闭零影响由 {@link ModToggleRegressionTest} 覆盖;此处聚焦数据皮本身的
- * register/hydrate 正确性。
  */
 public class DataSkinItemTest {
 
     private static HeadlessApplication application;
     private static int savedVersionCode;
+    private static String savedVersion;
 
     @BeforeClass
     public static void initHeadless() {
@@ -45,7 +47,9 @@ public class DataSkinItemTest {
         config.updatesPerSecond = 1;
         application = new HeadlessApplication(new ApplicationAdapter() {}, config);
         savedVersionCode = Game.versionCode;
+        savedVersion = Game.version;
         Game.versionCode = 896;
+        Game.version = "test";
     }
 
     @Before
@@ -57,72 +61,95 @@ public class DataSkinItemTest {
     @AfterClass
     public static void shutdown() {
         Game.versionCode = savedVersionCode;
+        Game.version = savedVersion;
         try { if (application != null) application.exit(); } catch (Throwable ignored) { }
     }
 
     @Test
-    public void threeRemishedDataSkinsRegistered() {
+    public void threeRemishedMaterialsRegisteredAsLuaMaterial() {
         LuaEngine.init();
-        assertTrue("rotten_organ.lua should register", LuaItemRegistry.contains("rotten_organ"));
-        assertTrue("bone_shard.lua should register", LuaItemRegistry.contains("bone_shard"));
-        assertTrue("toxic_gland.lua should register", LuaItemRegistry.contains("toxic_gland"));
+        for (String id : new String[]{"rotten_organ", "bone_shard", "toxic_gland"}) {
+            assertTrue(id + " should register", LuaItemRegistry.contains(id));
+            Item item = LuaItemRegistry.createItem(id);
+            assertNotNull(id + " should create", item);
+            assertTrue(id + " must be a LuaMaterial (M6d fix)", item instanceof LuaMaterial);
+            assertFalse(id + " must NOT be a MeleeWeapon", item instanceof MeleeWeapon);
+        }
     }
 
     @Test
-    public void rottenOrganHydratesDataFields() {
+    public void rottenOrganHydratesMaterialFields() {
         LuaEngine.init();
-        LuaItem item = LuaItemRegistry.create("rotten_organ");
-        assertNotNull(item);
-        assertEquals("腐烂器官", item.name());
-        assertTrue("desc should carry the C-path limitation note", item.desc().contains("C 路径数据皮"));
-        assertEquals("material skin uses tier=0", 0, item.tier);
-        assertEquals("image int carried over from Remished", 4, item.image);
-        assertTrue("a LuaItem data-skin is still a MeleeWeapon (structural mismatch)",
-                item instanceof MeleeWeapon);
+        LuaMaterial organ = (LuaMaterial) LuaItemRegistry.createItem("rotten_organ");
+        assertNotNull(organ);
+        assertEquals("腐烂器官", organ.name());
+        assertEquals("从瘟疫医生采集系统获得的腐烂器官。", organ.desc());
+        assertEquals(4, organ.image);
+        assertTrue("materials are stackable", organ.stackable);
+        assertEquals("price hydrates", 5, organ.value());
     }
 
     @Test
-    public void boneShardAndToxicGlandHydrateDataFields() {
+    public void createWeaponRejectsMaterialId() {
         LuaEngine.init();
-        LuaItem bone = LuaItemRegistry.create("bone_shard");
-        assertNotNull(bone);
-        assertEquals("骨片碎片", bone.name());
-        assertEquals(0, bone.tier);
-        assertEquals(5, bone.image);
+        // Legacy weapon-only entry must not swallow a material as a weapon.
+        assertEquals("createWeapon must refuse a material", null, LuaItemRegistry.createWeapon("rotten_organ"));
+        // It still works for a real weapon id.
+        assertNotNull(LuaItemRegistry.createWeapon("hooked_dagger"));
+    }
 
-        LuaItem gland = LuaItemRegistry.create("toxic_gland");
-        assertNotNull(gland);
-        assertEquals("毒腺", gland.name());
-        assertEquals(0, gland.tier);
-        assertEquals(3, gland.image);
+    @Test
+    public void isSimilarMergesSameMaterialOnly() {
+        LuaEngine.init();
+        LuaMaterial a = (LuaMaterial) LuaItemRegistry.createItem("rotten_organ");
+        LuaMaterial b = (LuaMaterial) LuaItemRegistry.createItem("rotten_organ");
+        LuaMaterial c = (LuaMaterial) LuaItemRegistry.createItem("bone_shard");
+        assertNotNull(a); assertNotNull(b); assertNotNull(c);
+        assertTrue("same id materials merge", a.isSimilar(b));
+        assertFalse("different id materials do not merge", a.isSimilar(c));
     }
 
     /**
-     * C 路径头号局限锁定:{@code price} / {@code stackable} 填在 register_item table 里,
-     * 但 {@link LuaItem#hydrate} 不读 —— 注册不抛错,且 stackable 保持 false(材料语义丢失)。
-     * 若未来有人给 hydrate 加了 price/stackable 支持,此测试会失败,提醒更新 C 路径成本结论。
+     * Codex plan round-1 must-fix: bundle restore must not reset quantity to the
+     * script default. Save at quantity 7 (≠ default 1), round-trip, and confirm
+     * the saved count survives and drives value().
      */
     @Test
-    public void priceAndStackableFieldsAreIgnoredSilently() {
+    public void bundleRestoreKeepsSavedQuantityNotScriptDefault() {
         LuaEngine.init();
-        Globals g = LuaEngine.instance().globals();
-        g.load("register_item{ id='limit_probe', name='探测', tier=0, image=0, "
-                + "price=99, stackable=true, info='ignored' }").call();
-        assertTrue(LuaItemRegistry.contains("limit_probe"));
+        LuaMaterial organ = (LuaMaterial) LuaItemRegistry.createItem("rotten_organ");
+        assertNotNull(organ);
+        organ.quantity(7);
 
-        LuaItem item = LuaItemRegistry.create("limit_probe");
-        assertNotNull(item);
-        assertFalse("stackable must remain false — LuaItem.hydrate does not read it (C-path limitation)",
-                item.stackable);
+        Bundle b = new Bundle();
+        organ.storeInBundle(b);
+        LuaMaterial restored = new LuaMaterial();
+        restored.restoreFromBundle(b);
+
+        assertEquals("saved quantity (7) must survive, not the script default (1)",
+                7, restored.quantity());
+        assertEquals("value() uses the restored quantity", 5 * 7, restored.value());
+        assertEquals("metadata re-hydrates from the registry", "腐烂器官", restored.name());
     }
 
-    /** All three data skins are reachable via {@link Generator}'s LUA_ITEM pool. */
+    /**
+     * detach via split path uses Reflection.newInstance + bundle round-trip; the
+     * split copy must re-hydrate as the same material id and keep quantity 1.
+     */
     @Test
-    public void dataSkinsReachableFromGeneratorPool() {
+    public void detachSplitCopyRehydratesAsMaterial() {
         LuaEngine.init();
-        java.util.Set<String> ids = LuaItemRegistry.ids();
-        assertTrue("rotten_organ in registry", ids.contains("rotten_organ"));
-        assertTrue("bone_shard in registry", ids.contains("bone_shard"));
-        assertTrue("toxic_gland in registry", ids.contains("toxic_gland"));
+        LuaMaterial organ = (LuaMaterial) LuaItemRegistry.createItem("rotten_organ");
+        assertNotNull(organ);
+        organ.quantity(2);
+        Bag bag = new Bag();
+        bag.items.add(organ);
+
+        Item detached = organ.detach(bag);
+
+        assertNotNull(detached);
+        assertTrue("split copy is a LuaMaterial", detached instanceof LuaMaterial);
+        assertEquals(1, detached.quantity());
+        assertEquals("split copy re-hydrates name", "腐烂器官", detached.name());
     }
 }

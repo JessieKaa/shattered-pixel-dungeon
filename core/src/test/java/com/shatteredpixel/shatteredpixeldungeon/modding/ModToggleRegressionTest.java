@@ -76,6 +76,7 @@ public class ModToggleRegressionTest {
 		assertFalse(LuaAllyRegistry.contains("test_ally"));
 		assertFalse(LuaHeroRegistry.contains("test_hero"));
 		assertFalse(LuaSpellRegistry.contains("test_spell"));
+		assertFalse("M6d spell dir must not load when disabled", LuaSpellRegistry.contains("heal"));
 		assertFalse("town NPCs must not load when disabled", LuaNpcRegistry.contains("town_portal"));
 		assertFalse(LuaNpcRegistry.contains("town_return"));
 		assertFalse(LuaShopRegistry.contains("test_shop"));
@@ -98,6 +99,8 @@ public class ModToggleRegressionTest {
 		assertTrue(LuaItemRegistry.contains("rotten_organ"));
 		assertTrue(LuaItemRegistry.contains("bone_shard"));
 		assertTrue(LuaItemRegistry.contains("toxic_gland"));
+		assertTrue("M6d weapon representative loads", LuaItemRegistry.contains("hooked_dagger"));
+		assertTrue("M6d weapon representative loads", LuaItemRegistry.contains("kunai"));
 		assertTrue("entry item", LuaItemRegistry.contains("test_mod_item"));
 		assertTrue(LuaMobRegistry.contains("test_mob"));
 		assertTrue("M6a blob PoC mob loads", LuaMobRegistry.contains("test_blob_rat"));
@@ -110,6 +113,14 @@ public class ModToggleRegressionTest {
 		assertTrue(LuaAllyRegistry.contains("test_ally"));
 		assertTrue(LuaHeroRegistry.contains("test_hero"));
 		assertTrue(LuaSpellRegistry.contains("test_spell"));
+		assertTrue("M6d heal spell loads", LuaSpellRegistry.contains("heal"));
+		assertTrue("M6d haste spell loads", LuaSpellRegistry.contains("haste"));
+		assertTrue("M6d charm spell loads", LuaSpellRegistry.contains("charm"));
+		assertTrue("M6d lightning spell loads", LuaSpellRegistry.contains("lightning_bolt"));
+		assertTrue("M6d town portal spell loads", LuaSpellRegistry.contains("town_portal"));
+		assertTrue("M6d summon spell loads", LuaSpellRegistry.contains("summon_beast"));
+		assertTrue("M6d raise dead spell loads", LuaSpellRegistry.contains("raise_dead"));
+		assertTrue("M6d sprout spell loads", LuaSpellRegistry.contains("sprout"));
 		assertTrue(LuaNpcRegistry.contains("test_npc"));
 		assertTrue(LuaNpcRegistry.contains("town_portal"));
 		assertTrue(LuaNpcRegistry.contains("town_return"));
@@ -121,11 +132,11 @@ public class ModToggleRegressionTest {
 		assertEquals("16 M6c buff ports", 16, LuaBuffRegistry.size());
 
 		// Exact sizes: catches a missing/misnamed script that ID-checks alone could miss.
-		assertEquals("8 item dir scripts + 1 entry item", 9, LuaItemRegistry.size());
+		assertEquals("10 item dir scripts + 1 entry item", 11, LuaItemRegistry.size());
 		assertEquals("test_mob + M6a PoC + 6 M6b PoC mobs", 8, LuaMobRegistry.size());
 		assertEquals(1, LuaAllyRegistry.size());
 		assertEquals(1, LuaHeroRegistry.size());
-		assertEquals(1, LuaSpellRegistry.size());
+		assertEquals("test_spell + 8 M6d representative spells", 9, LuaSpellRegistry.size());
 		assertEquals("3 NPC scripts (test_npc + town_portal + town_return)", 3, LuaNpcRegistry.size());
 		assertEquals(1, LuaShopRegistry.size());
 	}

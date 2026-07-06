@@ -1,12 +1,12 @@
--- M6-fast C 路径数据皮:Remished 纯数据材料 item 的搬运验证。
--- 原件: ../remished-dungeon/scripts/items/ToxicGland.lua (Plague Doctor 材料类,21 行,无行为回调)
--- 见 rotten_organ.lua 头注对 C 路径局限的说明(类型错配 + price/stackable 不被读取)。
+-- M6d material item: Remished Plague Doctor 毒腺 (ToxicGland)。
+-- 走 LuaMaterial(plain Item)而非 weapon wrapper,见 rotten_organ.lua 头注。
+-- 原件: ../remished-dungeon/scripts/items/ToxicGland.lua
 register_item {
     id = "toxic_gland",
+    type = "material",
     name = "毒腺",
-    desc = "含有毒素的生物腺体。(C 路径数据皮:材料语义未保留,实际作为 tier=0 武器加载。)",
+    desc = "含有毒素的生物腺体。",
     image = 3,
-    tier = 0,
     price = 5,
     stackable = true,
 }

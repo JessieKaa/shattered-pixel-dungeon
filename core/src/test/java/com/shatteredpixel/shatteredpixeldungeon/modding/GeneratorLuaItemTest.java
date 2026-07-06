@@ -19,8 +19,8 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Verifies the M1 Generator dual-source: {@link Generator#random(Generator.Category)}
- * with {@code LUA_ITEM} must return a {@link LuaItem} drawn from
+ * Verifies the M1/M6d Generator dual-source: {@link Generator#random(Generator.Category)}
+ * with {@code LUA_ITEM} must return a Lua-defined {@link Item} drawn from
  * {@link LuaItemRegistry}, and the pool must report empty (so Generator can fall
  * back) when no Lua scripts have run.
  *
@@ -65,20 +65,15 @@ public class GeneratorLuaItemTest {
     }
 
     @Test
-    public void generatorRandomLuaItemReturnsLuaItem() {
+    public void generatorRandomLuaItemReturnsLuaDefinedItem() {
         LuaEngine.init();
         assertTrue("engine should have registered test items (test_sword/axe/dagger)",
                 LuaItemRegistry.size() >= 3);
 
         Item item = Generator.random(Generator.Category.LUA_ITEM);
         assertNotNull(item);
-        assertTrue("Generator.random(LUA_ITEM) must return a LuaItem, got " + item.getClass().getSimpleName(),
-                item instanceof LuaItem);
-        // The Lua table's name hydrated (non-empty, and not the degraded "???" LuaItem uses
-        // when its registry entry is missing). The instanceof check above is the main contract;
-        // we deliberately do NOT require a "(Lua)" substring — M6-fast C-path data skins carry
-        // real translated names (e.g. "腐烂器官") without that debug marker, and the pool draws
-        // from the whole registry, so a marker-based assertion would flake.
+        assertTrue("Generator.random(LUA_ITEM) must return a Lua-defined item, got " + item.getClass().getSimpleName(),
+                item instanceof LuaItem || item instanceof LuaMaterial);
         assertNotNull(item.name());
         assertFalse("name must hydrate from Lua, not stay degraded: " + item.name(),
                 item.name().startsWith("???"));
@@ -93,7 +88,7 @@ public class GeneratorLuaItemTest {
         for (int i = 0; i < 60; i++) {
             Item item = Generator.random(Generator.Category.LUA_ITEM);
             assertNotNull(item);
-            assertTrue(item instanceof LuaItem);
+            assertTrue(item instanceof LuaItem || item instanceof LuaMaterial);
             names.add(item.name());
         }
         assertTrue("expected ≥2 distinct Lua items across 60 pulls, got " + names,
@@ -127,9 +122,9 @@ public class GeneratorLuaItemTest {
         for (int i = 0; i < 20; i++) {
             Item item = Generator.random();
             assertNotNull(item);
-            if (item instanceof LuaItem) luaHits++;
+            if (item instanceof LuaItem || item instanceof LuaMaterial) luaHits++;
         }
-        assertTrue("Generator.random() deck must emit LuaItem when LUA_ITEM is the only "
+        assertTrue("Generator.random() deck must emit Lua-defined items when LUA_ITEM is the only "
                         + "weighted category (got " + luaHits + "/20)",
                 luaHits >= 15);
     }

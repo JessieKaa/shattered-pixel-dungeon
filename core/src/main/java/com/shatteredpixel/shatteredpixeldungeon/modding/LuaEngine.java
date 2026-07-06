@@ -408,7 +408,12 @@ public class LuaEngine implements ResourceFinder {
 				LuaTable tbl = arg.checktable();
 				String id = tbl.get("id").checkjstring();
 				tbl.get("name").checkjstring();
-				tbl.get("tier").checkint();
+				// M6d: materials (type/kind = "material") are plain Items, not weapons,
+				// so they have no tier. Everything else keeps the weapon contract.
+				String kind = tbl.get("type").optjstring(tbl.get("kind").optjstring(""));
+				if (!"material".equalsIgnoreCase(kind)) {
+					tbl.get("tier").checkint();
+				}
 				// M2: image is optional (defaults to 0). Callback fields
 				// (attackProc/onEquip/onDeactivate) are plain table entries and
 				// need no validation here — LuaItemCallbacks handles missing ones.
