@@ -84,6 +84,34 @@ final class RpdApi {
     private static final float MAX_AMOUNT = 1000f;
 
     /**
+     * M6e balance #1: per-hero, per-depth cumulative {@code giveItem} quota. Blocks
+     * a Lua script from flooding the backpack by calling {@code giveItem} in a loop
+     * (a single call can already grant up to {@link #MAX_AMOUNT}). Fork-local static
+     * map — no {@link Hero} field or bundle concern; resets naturally as depth
+     * changes, and {@link #resetGiveQuota()} clears it for tests / new runs.
+     */
+    private static final int GIVE_ITEM_CAP_PER_DEPTH = 20;
+    private static final java.util.Map<Integer, java.util.Map<Integer, Integer>> giveQuota = new java.util.HashMap<>();
+
+    /** Test / new-run hook — clears the {@code giveItem} quota. */
+    static void resetGiveQuota() {
+        giveQuota.clear();
+    }
+
+    private static boolean giveQuotaAllows(int heroId, int qty) {
+        int depth = Dungeon.depth;
+        int already = giveQuota.getOrDefault(heroId, java.util.Collections.emptyMap())
+                .getOrDefault(depth, 0);
+        return already + qty <= GIVE_ITEM_CAP_PER_DEPTH;
+    }
+
+    private static void recordGive(int heroId, int qty) {
+        int depth = Dungeon.depth;
+        giveQuota.computeIfAbsent(heroId, k -> new java.util.HashMap<>())
+                .merge(depth, qty, Integer::sum);
+    }
+
+    /**
      * Identifiable singleton passed to {@link Char#damage} as the source.
      * {@code Char.damage} reads {@code src.getClass()} for resistance/death-cause
      * categorisation, so a named object (not {@code RpdApi.class}, whose getClass
@@ -1088,6 +1116,12 @@ final class RpdApi {
                     Gdx.app.error(TAG, "giveItem rejected qty " + qty);
                     return NIL;
                 }
+                if (!giveQuotaAllows(hero.id(), n)) {
+                    Gdx.app.error(TAG, "giveItem quota exceeded for hero " + hero.id()
+                            + " at depth " + Dungeon.depth
+                            + " (cap " + GIVE_ITEM_CAP_PER_DEPTH + "/depth)");
+                    return LuaValue.valueOf(false);
+                }
                 Item item = LuaItemRegistry.createItem(itemId.checkjstring());
                 if (item == null) {
                     Gdx.app.error(TAG, "giveItem: unknown item id '" + itemId.tojstring() + "'");
@@ -1095,6 +1129,7 @@ final class RpdApi {
                 }
                 item.quantity(n);
                 boolean ok = item.collect(hero.belongings.backpack);
+                if (ok) recordGive(hero.id(), n);
                 return LuaValue.valueOf(ok);
             } catch (Exception e) {
                 Gdx.app.error(TAG, "giveItem threw", e);

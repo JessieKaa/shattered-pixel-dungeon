@@ -69,6 +69,17 @@ public final class LuaItemRegistry {
 		return kind.equalsIgnoreCase("material");
 	}
 
+	/**
+	 * Whether the registered id is a {@code type/kind = "material"} table (M6e
+	 * balance #5). Used by {@link LuaItemPool} to keep materials out of the
+	 * generic LUA_ITEM roll — materials are crafting components, not weapon-shaped
+	 * drops, so they must not spawn from {@code Generator.random(LUA_ITEM)}.
+	 */
+	public static boolean isMaterial(String id) {
+		LuaTable tbl = items.get(id);
+		return tbl != null && isMaterial(tbl);
+	}
+
 	public static boolean contains(String id) {
 		return items.containsKey(id);
 	}

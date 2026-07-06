@@ -53,6 +53,7 @@ public class RpdApiItemSpellTest {
     public void resetState() throws Exception {
         ModTestSupport.enableTestMod();
         ModTestSupport.resetLuaState();
+        RpdApi.resetGiveQuota();
         Dungeon.level = null;
         Dungeon.hero = null;
     }
@@ -105,6 +106,33 @@ public class RpdApiItemSpellTest {
             assertTrue("unknown item → nil", g.load("return RPD.giveItem(" + hero.id() + ", 'nope', 1)").call().isnil());
             assertTrue("bad qty → nil", g.load("return RPD.giveItem(" + hero.id() + ", 'rotten_organ', 0)").call().isnil());
             assertTrue("non-string id → nil", g.load("return RPD.giveItem(" + hero.id() + ", 5, 1)").call().isnil());
+        } finally {
+            Dungeon.hero = null;
+        }
+    }
+
+    // ---- M6e balance #1: giveItem per-hero-per-depth quota ----
+
+    @Test
+    public void giveItemQuotaBlocksRunawaySpam() {
+        Globals g = globals();
+        Hero hero = newHero();
+        Dungeon.hero = hero;
+        try {
+            // First call within the per-depth cap collects fine.
+            LuaValue r1 = g.load("return RPD.giveItem(" + hero.id() + ", 'rotten_organ', 15)").call();
+            assertTrue("within cap → collected", r1.isboolean() && r1.toboolean());
+
+            // Second call would push the running total past the cap → refused with false
+            // (distinct from bad-input nil). This is the guard that breaks an infinite giveItem loop.
+            LuaValue r2 = g.load("return RPD.giveItem(" + hero.id() + ", 'rotten_organ', 10)").call();
+            assertTrue("over cap → boolean false (not nil)", r2.isboolean());
+            assertFalse("over cap → refused", r2.toboolean());
+
+            // resetGiveQuota clears the running total so the same call succeeds again.
+            RpdApi.resetGiveQuota();
+            LuaValue r3 = g.load("return RPD.giveItem(" + hero.id() + ", 'rotten_organ', 10)").call();
+            assertTrue("after reset → collected again", r3.isboolean() && r3.toboolean());
         } finally {
             Dungeon.hero = null;
         }

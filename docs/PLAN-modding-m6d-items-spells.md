@@ -91,6 +91,18 @@ Remished 脚本规模:
   - `lightning_bolt`/`cellRay` 无 VFX,只有逻辑伤害;targeting UI(self/char/cell)目前都是 self 施法占位,真实目标选择 M6e
   - LuaMaterial `value()` = price × quantity,材料进 Generator LUA_ITEM 池后会和武器混在一起随机掉落(firstProb=0 仍不进 vanilla deck,但 `Generator.random(LUA_ITEM)` 现在可能返回材料)
 
+## M6e 处置结果(2026-07-06 回填)
+
+5 项风险逐项处置(2 修 / 3 接受降级留 M7):
+
+- **#1 `giveItem` 刷分 = 修**:`GiveItem` 加 per-hero-per-depth 累计配额(`GIVE_ITEM_CAP_PER_DEPTH = 20`),fork-local static `Map<heroId, Map<depth, count>>`,超限 → `valueOf(false)`;不触 Hero 字段/不进 bundle;`RpdApi.resetGiveQuota()` 测试钩子。单测 `giveItemQuotaBlocksRunawaySpam` 绿。
+- **#5 LuaMaterial 池混掉 = 修**:`LuaItemRegistry.isMaterial(String id)` 暴露;`LuaItemPool.random()` 默认 weapons-only(跳过 material id);新增 `randomMaterial()` 独立入口。`Generator.random(LUA_ITEM)` 不再返回材料。单测 `defaultPoolExcludesMaterials` 绿。
+- **#2 stolen loot 持久化 = 接受降级,留 M7**:`Mob.storeInBundle` 不存 generic Item loot;LuaMob 已 override bundle,M7 廉价补(存 `STOLEN_LOOT` key + `createLoot` 兼容)+ thief 返回 UI。M6e 记录,不阻塞。
+- **#3 summon/raise_dead sprite = 接受降级,留 M7**:复用 test_mob 占位,需 skeleton/zombie sprite + 平衡数据(资产缺口,非 M6e 范围)。
+- **#4 targeting UI = 接受降级,留 M7**:cast 全 self 占位,真实目标选择需新 UI 工作(M7)。
+
+M6d 的 item/spell + 11 API 在 M6e C3 全量回归中保持绿(8 registry disabled=0/enabled=full,273 tests)。
+
 ## Parallel notes(M6c)
 
 M6c 与 M6d 并行。共享冲突点:`RpdApi.build()` 注册区、`ModToggleRegressionTest` registry exact counts。约定:
