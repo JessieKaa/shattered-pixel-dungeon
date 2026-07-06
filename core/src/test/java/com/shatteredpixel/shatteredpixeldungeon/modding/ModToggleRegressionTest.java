@@ -97,6 +97,7 @@ public class ModToggleRegressionTest {
 		assertTrue(LuaItemRegistry.contains("toxic_gland"));
 		assertTrue("entry item", LuaItemRegistry.contains("test_mod_item"));
 		assertTrue(LuaMobRegistry.contains("test_mob"));
+		assertTrue("M6a blob PoC mob loads", LuaMobRegistry.contains("test_blob_rat"));
 		assertTrue(LuaAllyRegistry.contains("test_ally"));
 		assertTrue(LuaHeroRegistry.contains("test_hero"));
 		assertTrue(LuaSpellRegistry.contains("test_spell"));
@@ -107,7 +108,7 @@ public class ModToggleRegressionTest {
 
 		// Exact sizes: catches a missing/misnamed script that ID-checks alone could miss.
 		assertEquals("8 item dir scripts + 1 entry item", 9, LuaItemRegistry.size());
-		assertEquals(1, LuaMobRegistry.size());
+		assertEquals("test_mob + M6a test_blob_rat PoC", 2, LuaMobRegistry.size());
 		assertEquals(1, LuaAllyRegistry.size());
 		assertEquals(1, LuaHeroRegistry.size());
 		assertEquals(1, LuaSpellRegistry.size());
