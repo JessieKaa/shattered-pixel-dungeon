@@ -1,8 +1,24 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import com.badlogic.gdx.Gdx;
+import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Blob;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Blizzard;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.ConfusionGas;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.CorrosiveGas;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Electricity;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Fire;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Freezing;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Inferno;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.ParalyticGas;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Regrowth;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.SmokeScreen;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.StenchGas;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.StormCloud;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.ToxicGas;
+import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Web;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Barkskin;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Bleeding;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
@@ -96,6 +112,15 @@ final class RpdApi {
         // must run on render). Both are debug-gated inside LuaLevelService.
         rpd.set("enterTown", new EnterTown());
         rpd.set("leaveTown", new LeaveTown());
+        // M6a: Remished-bridge subset for blob/immunity driven mobs (D5'-(a):
+        // hand-built id-based API, luajava stays disabled). Blobs/Buffs are
+        // string-id constant tables (no Java Class handle crosses the sandbox);
+        // placeBlob seeds a whitelisted Blob at a cell; addImmunity registers a
+        // whitelisted Class in a LuaMob's immunities so its own gas can't hurt it.
+        rpd.set("Blobs", blobConstants());
+        rpd.set("Buffs", buffConstants());
+        rpd.set("placeBlob", new PlaceBlob());
+        rpd.set("addImmunity", new AddImmunity());
         return rpd;
     }
 
@@ -472,6 +497,151 @@ final class RpdApi {
         }
     }
 
+    // ---- M6a: blobs + immunity ----
+
+    /**
+     * {@code RPD.Blobs} constant table — maps stable Lua names to themselves
+     * (the internal whitelist key). The indirection means internals can be
+     * renamed without breaking scripts; Lua never receives a Class handle
+     * (D5'-(a): luajava stays disabled). The set of ids is exactly
+     * {@link BlobRegistry#lookup}'s keys.
+     */
+    private static LuaTable blobConstants() {
+        LuaTable t = new LuaTable();
+        for (String id : BlobRegistry.ids()) t.set(id, LuaValue.valueOf(id));
+        return t;
+    }
+
+    /**
+     * {@code RPD.Buffs} — same pattern as {@link #blobConstants()} for the buff
+     * whitelist ({@link BuffWhitelist}). Each value is the simple class name that
+     * {@code affectBuff} already accepts, so {@code RPD.affectBuff(charId,
+     * RPD.Buffs.Poison, amt)} works without changing affectBuff's signature.
+     */
+    private static LuaTable buffConstants() {
+        LuaTable t = new LuaTable();
+        for (String id : BuffWhitelist.ids()) t.set(id, LuaValue.valueOf(id));
+        return t;
+    }
+
+    /**
+     * {@code RPD.placeBlob(blobId, pos, amount)} — seed a whitelisted
+     * {@link Blob} (gas/fire/web/...) at {@code pos}, mirroring the canonical
+     * vanilla idiom {@code GameScene.add(Blob.seed(cell, amount, TypeClass))}
+     * (DM200/FetidRat/Elemental). {@code blobId} is resolved through
+     * {@link BlobRegistry} — only registered blobs can be placed, so a script
+     * cannot summon an arbitrary/unbalanced blob. Guards headless (no
+     * {@code Dungeon.level}) and out-of-map cells so it never throws; logs +
+     * returns NIL on any bad input.
+     */
+    private static final class PlaceBlob extends ThreeArgFunction {
+        @Override public LuaValue call(LuaValue blobId, LuaValue pos, LuaValue amount) {
+            try {
+                String id = blobId.optjstring("");
+                Class<? extends Blob> clazz = BlobRegistry.lookup(id);
+                if (clazz == null) {
+                    Gdx.app.error(TAG, "placeBlob rejected unknown blob id: " + id);
+                    return NIL;
+                }
+                if (!pos.isint()) {
+                    Gdx.app.error(TAG, "placeBlob expected int pos, got " + pos.typename());
+                    return NIL;
+                }
+                int cell = pos.toint();
+                double amt = amount.isnumber() ? amount.todouble() : -1;
+                if (!validAmount(amt)) {
+                    Gdx.app.error(TAG, "placeBlob rejected amount " + amt + " for " + id);
+                    return NIL;
+                }
+                if (Dungeon.level == null) {
+                    // headless / pre-scene: no-op, never throw (PLAN step 4).
+                    Gdx.app.error(TAG, "placeBlob no-op: Dungeon.level is null");
+                    return NIL;
+                }
+                if (!Dungeon.level.insideMap(cell)) {
+                    // out-of-map cell would let Blob.seed's cur[cell] += amount
+                    // throw and leave a half-initialised blob in level.blobs.
+                    Gdx.app.error(TAG, "placeBlob rejected out-of-map cell " + cell);
+                    return NIL;
+                }
+                GameScene.add(Blob.seed(cell, (int) amt, clazz));
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "placeBlob threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * {@code RPD.addImmunity(charId, id)} — register a whitelisted Class in a
+     * {@link LuaMob}'s {@code immunities} so the mob is unaffected by the named
+     * blob/buff (the FetidRat pattern: a gas-emitting mob must be immune to its
+     * own gas). {@code id} is resolved first against {@link BlobRegistry} then
+     * {@link BuffWhitelist#lookupClass}; non-LuaMob targets are rejected so a
+     * script can't mutate vanilla actors' hardcoded immunities. Persisted across
+     * save/load by {@link LuaMob} (it records each Class's FQCN).
+     */
+    private static final class AddImmunity extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue idVal) {
+            try {
+                Char target = resolveChar(charId);
+                if (target == null) return NIL;
+                if (!(target instanceof LuaMob)) {
+                    Gdx.app.error(TAG, "addImmunity only applies to LuaMob; rejected "
+                            + target.getClass().getSimpleName());
+                    return NIL;
+                }
+                String id = idVal.optjstring("");
+                Class<?> type = BlobRegistry.lookup(id);
+                if (type == null) type = BuffWhitelist.lookupClass(id);
+                if (type == null) {
+                    Gdx.app.error(TAG, "addImmunity rejected unknown id: " + id);
+                    return NIL;
+                }
+                ((LuaMob) target).addLuaImmunity(id, type);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "addImmunity threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * The placeable-blob whitelist. Maps a Lua-facing simple class name to the
+     * Blob subclass; names not in this map are rejected by {@link PlaceBlob}.
+     * Fourteen common gameplay blobs (gas/fire/web/electricity/...); a script
+     * cannot reach arbitrary Blob subclasses (e.g. quest-only blobs).
+     */
+    static final class BlobRegistry {
+        private static final java.util.Map<String, Class<? extends Blob>> ENTRIES = new java.util.LinkedHashMap<>();
+        static {
+            ENTRIES.put("ToxicGas", ToxicGas.class);
+            ENTRIES.put("ParalyticGas", ParalyticGas.class);
+            ENTRIES.put("ConfusionGas", ConfusionGas.class);
+            ENTRIES.put("StenchGas", StenchGas.class);
+            ENTRIES.put("CorrosiveGas", CorrosiveGas.class);
+            ENTRIES.put("Fire", Fire.class);
+            ENTRIES.put("Web", Web.class);
+            ENTRIES.put("Freezing", Freezing.class);
+            ENTRIES.put("Blizzard", Blizzard.class);
+            ENTRIES.put("Inferno", Inferno.class);
+            ENTRIES.put("Regrowth", Regrowth.class);
+            ENTRIES.put("SmokeScreen", SmokeScreen.class);
+            ENTRIES.put("StormCloud", StormCloud.class);
+            ENTRIES.put("Electricity", Electricity.class);
+        }
+
+        static Class<? extends Blob> lookup(String simpleName) {
+            return ENTRIES.get(simpleName);
+        }
+
+        static java.util.Set<String> ids() {
+            return ENTRIES.keySet();
+        }
+
+        private BlobRegistry() { }
+    }
+
     /**
      * The buff whitelist. Each entry maps a Lua-facing simple class name to the
      * correct application strategy for that buff type. Names not in this map are
@@ -483,6 +653,10 @@ final class RpdApi {
      */
     static final class BuffWhitelist {
         private static final java.util.Map<String, BuffApplier> ENTRIES = new java.util.HashMap<>();
+        // Parallel id→Class map for addImmunity (resolve a Lua buff id to its
+        // Class without an extra applier). Kept in insertion order so
+        // buffConstants() emits a stable Lua table.
+        private static final java.util.Map<String, Class<? extends Buff>> BUFF_CLASSES = new java.util.LinkedHashMap<>();
         static {
             // FlavourBuff family: prolong(target, clazz, duration).
             putFlavour("Roots", Roots.class);
@@ -496,23 +670,36 @@ final class RpdApi {
                 Bleeding b = Buff.affect(t, Bleeding.class);
                 b.set(amt);
             });
+            BUFF_CLASSES.put("Bleeding", Bleeding.class);
             ENTRIES.put("Poison", (t, amt) -> {
                 Poison b = Buff.affect(t, Poison.class);
                 b.set(amt);
             });
+            BUFF_CLASSES.put("Poison", Poison.class);
             ENTRIES.put("Barkskin", (t, amt) -> {
                 Barkskin b = Buff.affect(t, Barkskin.class);
                 int v = Math.max(1, (int) amt);
                 b.set(v, v);
             });
+            BUFF_CLASSES.put("Barkskin", Barkskin.class);
         }
 
         private static <T extends FlavourBuff> void putFlavour(String name, Class<T> clazz) {
             ENTRIES.put(name, (t, amt) -> Buff.prolong(t, clazz, amt));
+            BUFF_CLASSES.put(name, clazz);
         }
 
         static BuffApplier lookup(String simpleName) {
             return ENTRIES.get(simpleName);
+        }
+
+        /** Resolve a Lua buff id to its Class for {@link AddImmunity}, or null. */
+        static Class<? extends Buff> lookupClass(String simpleName) {
+            return BUFF_CLASSES.get(simpleName);
+        }
+
+        static java.util.Set<String> ids() {
+            return BUFF_CLASSES.keySet();
         }
 
         private BuffWhitelist() { }

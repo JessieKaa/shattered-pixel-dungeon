@@ -14,10 +14,13 @@ import com.shatteredpixel.shatteredpixeldungeon.sprites.SkeletonSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.SlimeSprite;
 import com.watabou.utils.Bundle;
 import com.watabou.utils.Random;
+import com.watabou.utils.Reflection;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -67,10 +70,30 @@ public class LuaMob extends Mob {
 
 	private static final String TAG = "LuaMob";
 	private static final String LUA_MOB_ID = "lua_mob_id";
+	private static final String LUA_SPAWNED = "lua_spawned";
+	private static final String LUA_IMMUNITY_CLASSES = "lua_immunity_classes";
 
 	private String luaMobId;
 	private String nameStr = "???";
 	private int attackStat = 1;
+
+	/**
+	 * One-shot latch for the Lua {@code spawn} callback: fires on the first
+	 * {@link #act()} (so the mob has an id and is in the actor queue), then never
+	 * again. Persisted across save/load so a restore does not re-trigger spawn
+	 * (which would double-apply buffs/immunities). A LuaMob with no {@code spawn}
+	 * field simply skips the dispatch ({@link LuaItemCallbacks#callOpt}).
+	 */
+	private boolean spawned = false;
+
+	/**
+	 * FQCNs of immunities added via {@link RpdApi}'s {@code addImmunity}. These
+	 * are NOT persisted by {@link Char#storeInBundle} (only pos/HP/HT/buffs are),
+	 * so we persist them ourselves and rebuild {@code immunities} on restore —
+	 * otherwise a gas-emitting mob would lose its self-immunity after save/load
+	 * and poison itself to death.
+	 */
+	private final List<String> luaImmunityClassNames = new ArrayList<>();
 
 	/** Required for {@code Reflection.newInstance} during Bundle restore. */
 	public LuaMob() {
@@ -150,6 +173,15 @@ public class LuaMob extends Mob {
 	@Override
 	protected boolean act() {
 		LuaTable tbl = luaTable();
+		// One-shot spawn callback: fires before any act logic on the mob's first
+		// tick. Lua typically uses it to add self-immunity (RPD.addImmunity) or
+		// pick a kind. callOpt is fault-tolerant: no spawn fn / Lua error → skip.
+		if (!spawned) {
+			spawned = true;
+			if (tbl != null) {
+				LuaItemCallbacks.callOpt(tbl, "spawn", LuaValue.valueOf(id()));
+			}
+		}
 		LuaValue fn = (tbl != null) ? tbl.get("act") : LuaValue.NIL;
 		if (fn.isfunction()) {
 			try {
@@ -215,12 +247,33 @@ public class LuaMob extends Mob {
 		return nameStr;
 	}
 
+	// ---- Lua-driven immunity (M6a) ----
+
+	/**
+	 * Register a whitelisted Class in this mob's {@code immunities} (the FetidRat
+	 * pattern: a gas-emitting mob must be immune to its own gas). Called only by
+	 * {@link RpdApi}'s {@code addImmunity}, which has already resolved the Lua id
+	 * through the Blob/Buff whitelist — so an arbitrary Class cannot reach this
+	 * method. Records the FQCN so the immunity survives save/load (see
+	 * {@link #luaImmunityClassNames}). {@code immunities} is {@code protected} in
+	 * {@link Char}; access via inheritance ({@code this.immunities}) is legal for
+	 * a cross-package subclass.
+	 */
+	public void addLuaImmunity(String id, Class<?> type) {
+		immunities.add(type);
+		luaImmunityClassNames.add(type.getName());
+	}
+
 	// ---- persistence (D4) ----
 
 	@Override
 	public void storeInBundle(Bundle bundle) {
 		super.storeInBundle(bundle);
 		if (luaMobId != null) bundle.put(LUA_MOB_ID, luaMobId);
+		bundle.put(LUA_SPAWNED, spawned);
+		if (!luaImmunityClassNames.isEmpty()) {
+			bundle.put(LUA_IMMUNITY_CLASSES, luaImmunityClassNames.toArray(new String[0]));
+		}
 	}
 
 	@Override
@@ -235,6 +288,27 @@ public class LuaMob extends Mob {
 				// Engine init failed or script removed — degrade gracefully
 				// rather than crash the save load.
 				nameStr = "??? (" + luaMobId + ")";
+			}
+		}
+		// spawn latch round-trips; on restore it stays true so spawn does not
+		// re-fire (and re-apply buffs/immunities).
+		spawned = bundle.contains(LUA_SPAWNED) && bundle.getBoolean(LUA_SPAWNED);
+		// Rebuild immunities that addLuaImmunity added pre-save. Reflection.forName
+		// only resolves FQCNs we ourselves persisted (already whitelist-bound at
+		// add time); it does not parse fresh Lua input. Same pattern as SPD's
+		// existing Reflection-based bundle restore.
+		if (bundle.contains(LUA_IMMUNITY_CLASSES)) {
+			String[] names = bundle.getStringArray(LUA_IMMUNITY_CLASSES);
+			for (String fqcn : names) {
+				try {
+					Class<?> c = Reflection.forName(fqcn);
+					if (c != null) {
+						immunities.add(c);
+						luaImmunityClassNames.add(fqcn);
+					}
+				} catch (Exception e) {
+					Gdx.app.error(TAG, "restore lua immunity " + fqcn + " failed", e);
+				}
 			}
 		}
 	}
