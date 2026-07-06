@@ -91,6 +91,10 @@ public class ModToggleRegressionTest {
 		assertTrue(LuaItemRegistry.contains("test_dagger"));
 		assertTrue(LuaItemRegistry.contains("test_proc_weapon"));
 		assertTrue(LuaItemRegistry.contains("test_equip_buff"));
+		// M6-fast: 3 C-path data skins (Remished material reskins) added to test_mod.
+		assertTrue(LuaItemRegistry.contains("rotten_organ"));
+		assertTrue(LuaItemRegistry.contains("bone_shard"));
+		assertTrue(LuaItemRegistry.contains("toxic_gland"));
 		assertTrue("entry item", LuaItemRegistry.contains("test_mod_item"));
 		assertTrue(LuaMobRegistry.contains("test_mob"));
 		assertTrue(LuaAllyRegistry.contains("test_ally"));
@@ -102,7 +106,7 @@ public class ModToggleRegressionTest {
 		assertTrue(LuaShopRegistry.contains("test_shop"));
 
 		// Exact sizes: catches a missing/misnamed script that ID-checks alone could miss.
-		assertEquals("5 item dir scripts + 1 entry item", 6, LuaItemRegistry.size());
+		assertEquals("8 item dir scripts + 1 entry item", 9, LuaItemRegistry.size());
 		assertEquals(1, LuaMobRegistry.size());
 		assertEquals(1, LuaAllyRegistry.size());
 		assertEquals(1, LuaHeroRegistry.size());
