@@ -21,16 +21,28 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.ToxicGas;
 import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Web;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Barkskin;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Bleeding;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Blindness;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Bless;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Burning;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Chill;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Cripple;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Drowsy;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.FlavourBuff;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Haste;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Invisibility;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Levitation;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Light;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Ooze;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Paralysis;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Poison;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Roots;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Sleep;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Slow;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Speed;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vulnerable;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Weakness;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.npcs.NPC;
 import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfTeleportation;
@@ -128,6 +140,15 @@ final class RpdApi {
         rpd.set("cellDistance", new CellDistance());
         rpd.set("emptyCellNextTo", new EmptyCellNextTo());
         rpd.set("blink", new Blink());
+        // M6c buff API — affect/remove/permanent for both Java whitelist buffs
+        // and Lua-defined buffs (id-resolved). RPD.Buffs still covers only the
+        // Java whitelist (build() runs before loadBuffScripts()); Lua buff ids
+        // are passed as plain strings.
+        rpd.set("removeBuff", new RemoveBuff());
+        rpd.set("detachBuff", new RemoveBuff());
+        rpd.set("permanentBuff", new PermanentBuff());
+        rpd.set("setBuffLevel", new SetBuffLevel());
+        rpd.set("buffLevel", new BuffLevel());
         return rpd;
     }
 
@@ -159,20 +180,171 @@ final class RpdApi {
                 if (target == null) return NIL;
                 String name = buffName.optjstring("");
                 BuffApplier applier = BuffWhitelist.lookup(name);
-                if (applier == null) {
+                if (applier != null) {
+                    double amt = amount.isnumber() ? amount.todouble() : -1;
+                    if (!validAmount(amt)) {
+                        Gdx.app.error(TAG, "affectBuff rejected amount " + amt + " for " + name);
+                        return NIL;
+                    }
+                    applier.apply(target, (float) amt);
+                    return NIL;
+                }
+                // M6c: fall through to Lua buff registry (id-resolved). amount
+                // is interpreted as a level for Lua buffs (Remished scripts use
+                // buff:level(...)); a missing/invalid amount defaults to 1.
+                if (LuaBuffRegistry.contains(name)) {
+                    int lvl = amount.isnumber() ? Math.max(1, amount.toint()) : 1;
+                    affectLuaBuff(target, name, lvl, 0f);
+                } else {
                     Gdx.app.error(TAG, "affectBuff rejected non-whitelisted buff: " + name);
-                    return NIL;
                 }
-                double amt = amount.isnumber() ? amount.todouble() : -1;
-                if (!validAmount(amt)) {
-                    Gdx.app.error(TAG, "affectBuff rejected amount " + amt + " for " + name);
-                    return NIL;
-                }
-                applier.apply(target, (float) amt);
             } catch (Exception e) {
                 Gdx.app.error(TAG, "affectBuff threw", e);
             }
             return NIL;
+        }
+    }
+
+    /**
+     * Attach or refresh a Lua buff on {@code target}. Stacks by Lua id (not by
+     * class — {@code target.buff(LuaBuff.class)} is class-exact and would mix
+     * all Lua buffs). An existing instance is {@code refresh}ed in place; a new
+     * one is created via the registry and attached.
+     */
+    private static void affectLuaBuff(Char target, String id, int level, float duration) {
+        LuaBuff existing = findLuaBuff(target, id);
+        if (existing != null) {
+            existing.refresh(level, duration);
+            return;
+        }
+        LuaBuff lb = LuaBuffRegistry.create(id);
+        if (lb == null) {
+            Gdx.app.error(TAG, "affectLuaBuff: registry create failed for " + id);
+            return;
+        }
+        if (lb.attachTo(target)) {
+            lb.refresh(level, duration);
+        }
+    }
+
+    private static LuaBuff findLuaBuff(Char target, String id) {
+        for (Buff b : target.buffs(LuaBuff.class)) {
+            LuaBuff lb = (LuaBuff) b;
+            if (lb.sameLuaId(id)) return lb;
+        }
+        return null;
+    }
+
+    /**
+     * {@code RPD.removeBuff(charId, buffId)} — detach the named buff. For Java
+     * whitelist ids, delegates to {@link Buff#detach(Char, Class)}; for Lua
+     * buff ids, detaches the matching LuaBuff instance (id-resolved).
+     */
+    private static final class RemoveBuff extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue buffId) {
+            try {
+                Char target = resolveChar(charId);
+                if (target == null) return NIL;
+                String name = buffId.optjstring("");
+                Class<? extends Buff> clazz = BuffWhitelist.lookupClass(name);
+                if (clazz != null) {
+                    Buff.detach(target, clazz);
+                    return NIL;
+                }
+                if (LuaBuffRegistry.contains(name)) {
+                    for (Buff b : target.buffs(LuaBuff.class)) {
+                        LuaBuff lb = (LuaBuff) b;
+                        if (lb.sameLuaId(name)) lb.detach();
+                    }
+                } else {
+                    Gdx.app.error(TAG, "removeBuff rejected unknown buff id: " + name);
+                }
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "removeBuff threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * {@code RPD.permanentBuff(charId, buffId[, level])} — make a Lua buff
+     * permanent (parked at MAX_VALUE so it never acts). Java whitelist buffs
+     * are intentionally excluded: FlavourBuff/source-aware buffs have
+     * time/level semantics that "permanent" would silently break. An already
+     * attached Lua buff is upgraded in place; otherwise a fresh one is created.
+     */
+    private static final class PermanentBuff extends ThreeArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue buffId, LuaValue level) {
+            try {
+                Char target = resolveChar(charId);
+                if (target == null) return NIL;
+                String name = buffId.optjstring("");
+                if (!LuaBuffRegistry.contains(name)) {
+                    Gdx.app.error(TAG, "permanentBuff only applies to Lua buffs; rejected " + name);
+                    return NIL;
+                }
+                int lvl = level.isnumber() ? Math.max(1, level.toint()) : 1;
+                LuaBuff existing = null;
+                for (Buff b : target.buffs(LuaBuff.class)) {
+                    LuaBuff lb = (LuaBuff) b;
+                    if (lb.sameLuaId(name)) { existing = lb; break; }
+                }
+                if (existing == null) {
+                    existing = LuaBuffRegistry.create(name);
+                    if (existing == null) return NIL;
+                    if (!existing.attachTo(target)) return NIL;
+                }
+                existing.refresh(lvl, 0f);
+                existing.makePermanent();
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "permanentBuff threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * {@code RPD.setBuffLevel(charId, luaBuffId, level)} — set a LuaBuff's level.
+     * Java whitelist buffs intentionally excluded because their level/count
+     * semantics are per-class and not uniformly mutable.
+     */
+    private static final class SetBuffLevel extends ThreeArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue buffId, LuaValue level) {
+            try {
+                Char target = resolveChar(charId);
+                if (target == null) return NIL;
+                String name = buffId.optjstring("");
+                if (!LuaBuffRegistry.contains(name)) {
+                    Gdx.app.error(TAG, "setBuffLevel only applies to Lua buffs; rejected " + name);
+                    return NIL;
+                }
+                LuaBuff lb = findLuaBuff(target, name);
+                if (lb == null) return NIL;
+                if (!level.isnumber()) {
+                    Gdx.app.error(TAG, "setBuffLevel expected number level for " + name);
+                    return NIL;
+                }
+                lb.setLevel(level.toint());
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "setBuffLevel threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /** {@code RPD.buffLevel(charId, luaBuffId)} — return an attached LuaBuff's level or NIL. */
+    private static final class BuffLevel extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue buffId) {
+            try {
+                Char target = resolveChar(charId);
+                if (target == null) return NIL;
+                String name = buffId.optjstring("");
+                LuaBuff lb = findLuaBuff(target, name);
+                return lb == null ? NIL : LuaValue.valueOf(lb.level());
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "buffLevel threw", e);
+                return NIL;
+            }
         }
     }
 
@@ -787,6 +959,20 @@ final class RpdApi {
             putFlavour("Paralysis", Paralysis.class);
             putFlavour("Vertigo", Vertigo.class);
             putFlavour("Haste", Haste.class);
+            // M6c: extra FlavourBuff entries referenced by Remished buff scripts.
+            // All use the same prolong(target,clazz,duration) strategy, so the
+            // existing putFlavour helper covers them without per-buff code.
+            putFlavour("Invisibility", Invisibility.class);
+            putFlavour("Levitation", Levitation.class);
+            putFlavour("Light", Light.class);
+            putFlavour("Bless", Bless.class);
+            putFlavour("Speed", Speed.class);
+            putFlavour("Sleep", Sleep.class);
+            putFlavour("Drowsy", Drowsy.class);
+            putFlavour("Blindness", Blindness.class);
+            putFlavour("Weakness", Weakness.class);
+            putFlavour("Vulnerable", Vulnerable.class);
+            putFlavour("Chill", Chill.class);
             // Level-based buffs with type-specific setters.
             ENTRIES.put("Bleeding", (t, amt) -> {
                 Bleeding b = Buff.affect(t, Bleeding.class);
@@ -809,6 +995,17 @@ final class RpdApi {
                 b.set(v, v);
             });
             BUFF_CLASSES.put("Barkskin", Barkskin.class);
+            // Frost has no public set(float); left out (script can use the
+            // FlavourBuff-family Chill instead, or a Lua buff). Documented in
+            // PLAN §Pending Issues as a degraded Java mapping.
+            // Burning is applied via reignite(target, duration).
+            ENTRIES.put("Burning", (t, amt) -> {
+                com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Burning b =
+                        Buff.affect(t, com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Burning.class);
+                b.reignite(t, amt);
+            });
+            BUFF_CLASSES.put("Burning",
+                    com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Burning.class);
         }
 
         private static <T extends FlavourBuff> void putFlavour(String name, Class<T> clazz) {

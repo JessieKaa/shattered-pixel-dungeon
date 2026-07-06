@@ -99,6 +99,11 @@ public class LuaEngine implements ResourceFinder {
 			// future Lua level graph can reference it. Optional `path` overrides the default
 			// mods/levels/<id>.json location (consumed by LuaLevelService in M4b).
 			globals.set("register_level", new RegisterLevelFunction());
+			// M6c: register_buff global, mirroring register_spell for Lua-defined buffs.
+			// The table is stored as-is so LuaBuff can re-hydrate name/icon/act/attachTo/
+			// detach/immunities/onRestore after a save/load cycle (the table is the single
+			// source of truth, same pattern as LuaSpell/LuaItem).
+			globals.set("register_buff", new RegisterBuffFunction());
 			// M2: inject the narrow RPD.* surface (affectBuff/damageChar/GLog/...).
 			// Lua never gets a Char object — only int ids resolved via Actor.findById.
 			globals.set("RPD", RpdApi.build());
@@ -120,6 +125,7 @@ public class LuaEngine implements ResourceFinder {
 			loadSpellScripts();
 			loadNpcScripts();
 			loadShopScripts();
+			loadBuffScripts();
 
 			// M5b: load each enabled mod's entry script (Remixed-style init.lua that calls
 			// register_*). ModRegistry.all() lazy-scans on first use (production: triggers scan here;
@@ -230,6 +236,20 @@ public class LuaEngine implements ResourceFinder {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
 			loadScriptsFrom("mods/" + mod.id + "/scripts/shops", "Lua shops (" + mod.id + ")", LuaShopRegistry::size);
+		}
+	}
+
+	/**
+	 * M6c: enumerate {@code mods/<id>/scripts/buffs/*.lua} for each enabled mod and compile each.
+	 * Same enabled-mod iteration + two-stage listing as the other registries (M5c). Lua buffs are
+	 * not part of the vanilla buff set — they only enter play via {@code RPD.affectBuff} (Lua id)
+	 * / {@code RPD.permanentBuff} / {@code RPD.removeBuff}, or by Lua items/mobs attaching them.
+	 * Disabled mods contribute zero Lua buffs (C3 regression baseline).
+	 */
+	private void loadBuffScripts() {
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/buffs", "Lua buffs (" + mod.id + ")", LuaBuffRegistry::size);
 		}
 	}
 
@@ -357,6 +377,23 @@ public class LuaEngine implements ResourceFinder {
 			Gdx.app.error(TAG, "findResource " + filename + " failed", e);
 		}
 		return null;
+	}
+
+	/** Test-only: install the {@code register_*} globals + RPD onto an ad-hoc {@link Globals}
+	 *  instance so a unit test can exercise {@code register_buff}/{@code register_item}
+	 *  validation without driving a full {@link #init()} scan. Production wiring lives in
+	 *  {@link #initInternal()}; this just mirrors the global setup half. */
+	static void installGlobalsForTests(Globals g) {
+		g.set("register_item", new RegisterItemFunction());
+		g.set("register_mob", new RegisterMobFunction());
+		g.set("register_ally", new RegisterAllyFunction());
+		g.set("register_hero", new RegisterHeroFunction());
+		g.set("register_spell", new RegisterSpellFunction());
+		g.set("register_npc", new RegisterNpcFunction());
+		g.set("register_shop", new RegisterShopFunction());
+		g.set("register_level", new RegisterLevelFunction());
+		g.set("register_buff", new RegisterBuffFunction());
+		g.set("RPD", RpdApi.build());
 	}
 
 	/** The {@code register_item(table)} global handed to Lua. Validates required fields, logs and skips on bad input. */
@@ -598,6 +635,32 @@ public class LuaEngine implements ResourceFinder {
 				LuaLevelRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_level rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_buff(table)} global handed to Lua (M6c). Mirrors
+	 * {@link RegisterSpellFunction}: validates required fields ({@code id/name})
+	 * and skips on bad input. {@code icon/info/act/attachTo/detach/immunities/
+	 * onRestore} are plain table entries validated lazily by {@link LuaBuff}.
+	 */
+	private static class RegisterBuffFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_buff: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				tbl.get("name").checkjstring();
+				// icon/act/attachTo/detach/immunities/onRestore are optional; no validation here.
+				LuaBuffRegistry.register(id, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_buff rejected a malformed definition", e);
 			}
 			return NIL;
 		}
