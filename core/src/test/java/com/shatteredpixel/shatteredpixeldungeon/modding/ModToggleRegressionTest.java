@@ -98,6 +98,12 @@ public class ModToggleRegressionTest {
 		assertTrue("entry item", LuaItemRegistry.contains("test_mod_item"));
 		assertTrue(LuaMobRegistry.contains("test_mob"));
 		assertTrue("M6a blob PoC mob loads", LuaMobRegistry.contains("test_blob_rat"));
+		assertTrue("M6b shaman elder mob loads", LuaMobRegistry.contains("shaman_elder"));
+		assertTrue("M6b spider elite mob loads", LuaMobRegistry.contains("spider_elite"));
+		assertTrue("M6b deep snail mob loads", LuaMobRegistry.contains("deep_snail"));
+		assertTrue("M6b hydra mob loads", LuaMobRegistry.contains("hydra"));
+		assertTrue("M6b maze shadow mob loads", LuaMobRegistry.contains("maze_shadow"));
+		assertTrue("M6b buffer mob loads", LuaMobRegistry.contains("buffer"));
 		assertTrue(LuaAllyRegistry.contains("test_ally"));
 		assertTrue(LuaHeroRegistry.contains("test_hero"));
 		assertTrue(LuaSpellRegistry.contains("test_spell"));
@@ -108,7 +114,7 @@ public class ModToggleRegressionTest {
 
 		// Exact sizes: catches a missing/misnamed script that ID-checks alone could miss.
 		assertEquals("8 item dir scripts + 1 entry item", 9, LuaItemRegistry.size());
-		assertEquals("test_mob + M6a test_blob_rat PoC", 2, LuaMobRegistry.size());
+		assertEquals("test_mob + M6a PoC + 6 M6b PoC mobs", 8, LuaMobRegistry.size());
 		assertEquals(1, LuaAllyRegistry.size());
 		assertEquals(1, LuaHeroRegistry.size());
 		assertEquals(1, LuaSpellRegistry.size());

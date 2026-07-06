@@ -7,6 +7,8 @@ import com.badlogic.gdx.utils.JsonReader;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.ToxicGas;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Ooze;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -55,6 +57,7 @@ public class RpdApiBlobTest {
     private static HeadlessApplication application;
     private static int savedVersionCode;
     private static Level savedLevel;
+    private static Hero savedHero;
 
     @BeforeClass
     public static void initHeadless() {
@@ -64,6 +67,7 @@ public class RpdApiBlobTest {
         savedVersionCode = com.watabou.noosa.Game.versionCode;
         com.watabou.noosa.Game.versionCode = 896;
         savedLevel = Dungeon.level;
+        savedHero = Dungeon.hero;
     }
 
     @Before
@@ -73,11 +77,13 @@ public class RpdApiBlobTest {
         // Some tests set Dungeon.level; restore a clean (null) slate so a prior
         // test's level never leaks into a bad-input test that expects null.
         Dungeon.level = null;
+        Dungeon.hero = null;
     }
 
     @AfterClass
     public static void shutdown() {
         Dungeon.level = savedLevel;
+        Dungeon.hero = savedHero;
         com.watabou.noosa.Game.versionCode = savedVersionCode;
         try { if (application != null) application.exit(); } catch (Throwable ignored) { }
     }
@@ -280,6 +286,127 @@ public class RpdApiBlobTest {
                 getSpawned(restored));
     }
 
+    // ---- M6b: AI + positioning primitives ----
+
+    @Test
+    public void setMobAiSwitchesLuaMobState() {
+        LuaMobRegistry.clear();
+        LuaMobRegistry.register("ai_mob", baseMobTable("ai_mob"));
+        LuaMob mob = LuaMobRegistry.create("ai_mob");
+        Actor.add(mob);
+        try {
+            Globals g = globals();
+            g.load("RPD.setMobAi(" + mob.id() + ", 'fleeing')").call();
+            assertTrue("setMobAi fleeing switches state", mob.state == mob.FLEEING);
+            g.load("RPD.setMobAi(" + mob.id() + ", 'not_a_state')").call();
+            assertTrue("bad state leaves current state unchanged", mob.state == mob.FLEEING);
+            assertTrue("nonexistent char id returns nil", g.load("return RPD.setMobAi(999999, 'hunting')").call().isnil());
+        } finally {
+            Actor.remove(mob);
+        }
+    }
+
+    @Test
+    public void enemyOfChoosesAndCachesVisibleHeroBeforeSuperAct() {
+        Level lvl = buildTestLevel();
+        Dungeon.level = lvl;
+        LuaMobRegistry.clear();
+        LuaMobRegistry.register("enemy_mob", baseMobTable("enemy_mob"));
+        LuaMob mob = LuaMobRegistry.create("enemy_mob");
+        Hero hero = new Hero();
+        mob.pos = 17;
+        hero.pos = 34;
+        hero.HT = 20;
+        hero.HP = 20;
+        Dungeon.hero = hero;
+        lvl.mobs.add(mob);
+        Actor.add(mob);
+        Actor.add(hero);
+        try {
+            Globals g = globals();
+            LuaValue r = g.load("return RPD.enemyOf(" + mob.id() + ")").call();
+            assertTrue("enemyOf returns a visible hero id", r.isint());
+            assertEquals("enemyOf chooses the hero before super.act", hero.id(), r.toint());
+        } finally {
+            Actor.remove(mob);
+            Actor.remove(hero);
+            Dungeon.hero = null;
+            Dungeon.level = null;
+        }
+    }
+
+    @Test
+    public void blinkRejectsBadDestinationsWithoutThrowing() {
+        Level lvl = buildTestLevel();
+        Dungeon.level = lvl;
+        LuaMobRegistry.clear();
+        LuaMobRegistry.register("blink_mob", baseMobTable("blink_mob"));
+        LuaMob mob = LuaMobRegistry.create("blink_mob");
+        mob.pos = 17;
+        Actor.add(mob);
+        try {
+            Globals g = globals();
+            assertTrue("out-of-map blink returns nil", g.load(
+                    "return RPD.blink(" + mob.id() + ", " + (lvl.length() + 1) + ")").call().isnil());
+            assertTrue("occupied blink target returns nil", g.load(
+                    "return RPD.blink(" + mob.id() + ", 17)").call().isnil());
+        } finally {
+            Actor.remove(mob);
+            Dungeon.level = null;
+        }
+    }
+
+    @Test
+    public void cellDistanceUsesLevelChebyshevDistance() {
+        Level lvl = buildTestLevel();
+        Dungeon.level = lvl;
+        try {
+            Globals g = globals();
+            assertEquals("diagonal neighbour distance is 1", 1,
+                    g.load("return RPD.cellDistance(17, 34)").call().toint());
+            assertTrue("out-of-map returns nil",
+                    g.load("return RPD.cellDistance(17, " + (lvl.length() + 1) + ")").call().isnil());
+        } finally {
+            Dungeon.level = null;
+        }
+    }
+
+    @Test
+    public void emptyCellNextToReturnsOnlyNeighbourCells() {
+        Level lvl = buildTestLevel();
+        Dungeon.level = lvl;
+        try {
+            Globals g = globals();
+            LuaValue r = g.load("return RPD.emptyCellNextTo(17)").call();
+            assertTrue("interior cell has an empty neighbour", r.isint());
+            int cell = r.toint();
+            assertTrue("returned cell is inside map", lvl.insideMap(cell));
+            assertTrue("returned cell is passable", lvl.passable[cell]);
+            assertEquals("returned cell is adjacent, not the source cell", 1, lvl.distance(17, cell));
+            LuaValue edge = g.load("return RPD.emptyCellNextTo(0)").call();
+            assertTrue("edge/corner handling never throws", edge.isnil() || edge.isint());
+        } finally {
+            Dungeon.level = null;
+        }
+    }
+
+    @Test
+    public void oozeIsWhitelistedAndApplicable() {
+        LuaMobRegistry.clear();
+        LuaMobRegistry.register("ooze_target", baseMobTable("ooze_target"));
+        LuaMob mob = LuaMobRegistry.create("ooze_target");
+        Actor.add(mob);
+        try {
+            Globals g = globals();
+            assertTrue("Ooze appears in RPD.Buffs", g.get("RPD").get("Buffs").get("Ooze").isstring());
+            assertNotNull("Ooze has a lookup Class", RpdApi.BuffWhitelist.lookupClass("Ooze"));
+            g.load("RPD.affectBuff(" + mob.id() + ", RPD.Buffs.Ooze, 5)").call();
+            assertNotNull("affectBuff applies Ooze", mob.buff(Ooze.class));
+        } finally {
+            Actor.remove(mob);
+        }
+    }
+
     // ---- M1 sandbox regression ----
 
     @Test
@@ -338,6 +465,7 @@ public class RpdApiBlobTest {
         lvl.visited = new boolean[lvl.length()];
         lvl.mapped = new boolean[lvl.length()];
         lvl.transitions = new java.util.ArrayList<>();
+        lvl.buildFlagMaps();
         return lvl;
     }
 }
