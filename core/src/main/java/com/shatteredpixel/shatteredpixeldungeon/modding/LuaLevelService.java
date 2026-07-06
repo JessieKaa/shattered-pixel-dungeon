@@ -120,6 +120,13 @@ public final class LuaLevelService {
 			}
 			level.create();
 
+			// FIX(M4a): Actor.init() (called inside switchLevel) only adds — it does not
+			// clear the previous actor set. Standard level switches clear first via
+			// InterlevelScene; enterLevel must too, otherwise mainline mobs (whose pos
+			// indexes the much larger mainline map) leak into the smaller SafeZone and
+			// overflow findPassable's vis/passable arrays (length=256; index=284/902).
+			Actor.clear();
+
 			Dungeon.switchLevel(level, level.entrance());
 			Game.switchScene(GameScene.class);
 		} catch (IOException e) {
