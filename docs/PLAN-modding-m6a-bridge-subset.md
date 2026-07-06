@@ -101,14 +101,18 @@ Goal 明确要求"**初始化加免疫**",故桥必须能表达免疫。在 luaj
 - [ ] 新增单测通过;既有 218 tests 不回归
 - [ ] **回填本 PLAN 末尾"M6b 预测"段**(M6a 实际补的 API 数 + 工时 → 单 mob 倒逼 API 数 → D5 建议)
 
-## M6b 预测(本 feature 完成后由 worker 回填)
+## M6b 预测(本 feature 完成后由 worker 回填 — 2026-07-06)
 
-- M6a 补的 API 数:__
-- M6a 实际工时:__
-- 单 mob 倒逼 API 数(FetidRat 实测):__
-- 推算 5-6 mob PoC 总缺口(M6b 要补的 API):__
-- **D5 建议**:(a) B 全量 / (b) B-mini 止 / (c) 转 C 路径
-- **D5' 是否需升级**(luajava 是否必须开):是 / 否 + 理由
+- **M6a 补的 API 数:5** 个 Lua-facing surface(`Blobs` 常量表 14 项 / `Buffs` 常量表 9 项 / `placeBlob` / `addImmunity` / `LuaMob.spawn` 回调)。配套 infra(无新 Lua surface):`BlobRegistry`、`BuffWhitelist.BUFF_CLASSES`、`LuaMob.addLuaImmunity`+FQCN 持久化。
+- **M6a 实际工时:≈ 2.5–3h 纯 feature 工作**(PLAN 细化 ~0.5h + 实施 ~0.75h + 测试调通 ~0.5h + codex 4 轮评审 ~1h)。注:额外有大量 codex 评审基础设施摩擦(CAO codex_reviewer terminal 投递与 codex CLI 冷启动竞态、`codex exec` 代理配置失效),属环境问题不计入 feature 工时 —— 见 dispatcher heads-up 已确认是已知问题。
+- **单 mob 倒逼 API 数(FetidRat/test_blob_rat 实测):4/5**。PoC mob 用到 placeBlob + Blobs.ToxicGas + addImmunity + spawn(共 4 个新 surface);`Buffs` 表本 mob 未用,但 buff 类 mob 必需。**关键发现**:FetidRat 真实行为还有两块 M6a 未覆盖——(a) `attackProc` 上 Ooze buff(Ooze 不在现 9 条 BuffWhitelist,需补 1 条 entry);(b) 自定义 Wandering AI(挑离 hero 最近的目的地,需 pathfinder)——后者是 luajava 禁下唯一"无法 trivially 翻译"的点。
+- **推算 5–6 mob PoC 总缺口(M6b 要补的 API):≈ 3–5 个新 primitive + 持续扩常量表**。
+  - **几乎肯定要补**:`BuffWhitelist` 按各 mob 的 debuff 扩(Ooze/Hunger/Burning/MagicalSleep 等,每条 1–3 行 entry,零成本)。
+  - **大概率要补 1 个新 API**:`RPD.nearestCell(pos, candidates)` 或 `RPD.pathDistance(from,to)`(覆盖 FetidRat/Brute 类"挑最近目的地"的自定义 AI)。一个静态包装,中等工作量。
+  - **可能要补(setMobAi/blink)**:若 PoC 选中含 AI 状态切换(如 SewerHeart)/瞬移(Spinner 类 web+blink)的 mob,各加一个 id-based 包装。
+  - **不太可能**:Remished 的 `chr:method()` 深度实例直调(背包遍历/belongings 操作)在 5–6 个 mob PoC 里未见刚需。
+- **D5 建议:(b) B-mini 止**。M6a 证明 id-based RpdApi 模式对 gas/buff/immunity/spawn 这类"选个预定义效果"的行为翻译良好(每个 primitive 就一个小包装 + 常量表 entry)。M6b 继续按各 mob 实际需要逐条加 id-based API 即可,5–6 mob 的新增 primitive 在 3–5 个量级,手工可担。不上 (a) B 全量(40 wrapper 过度),不转 (c)(丢掉 Lua modding 定位)。
+- **D5' 是否需升级(luajava 是否必须开):否,保持 (a) 禁用**。理由:(1) M6a PoC(gas+免疫+buff)在 luajava 禁下完整跑通,id-based API 够用;(2) 唯一摩擦点(自定义 wander AI)可用新 id-based API(`nearestCell`/`pathDistance`)解决,不必开 luajava;(3) 开 luajava 会击穿 M1 沙箱 + 违反 fork C 约束(定位是"可选内容包"非"任意代码执行",见 CLAUDE.md);(4) 5–6 PoC mob 未见深度依赖 `chr:method()` 实例直调。**升级触发条件**:M6b 出现某 mob 必须遍历/操作背包 items 或链式调多个实例方法且无法 id 化 → 那时再回头开 D5'。
 
 ## Risks
 
