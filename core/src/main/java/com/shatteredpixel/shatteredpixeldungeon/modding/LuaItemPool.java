@@ -1,5 +1,6 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
+import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.watabou.utils.Random;
 
 /**
@@ -15,11 +16,12 @@ public final class LuaItemPool {
 
 	private LuaItemPool() { }
 
-	public static LuaItem random() {
+	public static Item random() {
 		int n = LuaItemRegistry.size();
 		if (n <= 0) return null;
 		String[] ids = LuaItemRegistry.ids().toArray(new String[0]);
 		String id = Random.oneOf(ids);
-		return LuaItemRegistry.create(id);
+		return LuaItemRegistry.createItem(id);
 	}
 }
+

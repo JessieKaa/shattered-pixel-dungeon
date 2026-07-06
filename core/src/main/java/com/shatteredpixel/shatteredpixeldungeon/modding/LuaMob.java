@@ -5,6 +5,7 @@ import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
+import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.modding.annotations.LuaInterface;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.BatSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.BruteSprite;
@@ -313,6 +314,26 @@ public class LuaMob extends Mob {
 	public void addLuaImmunity(String id, Class<?> type) {
 		immunities.add(type);
 		luaImmunityClassNames.add(type.getName());
+	}
+
+	/**
+	 * Stash a stolen {@link Item} so {@link #createLoot()} drops it on death
+	 * (ScriptedThief bridge, M6d). {@link Mob#createLoot()} returns the raw
+	 * {@code loot} field when it is an {@link Item}, so assigning it here is the
+	 * same path vanilla mobs use for {@code loot = new Dewdrop()}. {@code loot}
+	 * is {@code protected} in {@link Mob}; cross-package subclass access via
+	 * {@code this.loot} is legal. Setting {@code lootChance = 1} guarantees the
+	 * drop fires. <b>Persistence gap (M6e):</b> {@link Mob#storeInBundle} does
+	 * not persist a generic {@code Item} loot, so a stolen item does not survive
+	 * save/load — recorded as an M6e risk, not fixed here.
+	 */
+	public void stolenLoot(Item item) {
+		loot = item;
+		lootChance = 1f;
+	}
+
+	public Item stolenLoot() {
+		return loot instanceof Item ? (Item) loot : null;
 	}
 
 	// ---- persistence (D4) ----

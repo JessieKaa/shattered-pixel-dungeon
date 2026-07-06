@@ -102,6 +102,27 @@ public class LuaSpellTest {
 	}
 
 	@Test
+	public void m6dRepresentativeSpellsRegisteredByEngineInit() {
+		LuaEngine.init();
+		String[] ids = {"heal", "haste", "charm", "lightning_bolt", "town_portal", "summon_beast", "raise_dead", "sprout"};
+		for (String id : ids) {
+			assertTrue("M6d representative spell should register: " + id, LuaSpellRegistry.contains(id));
+		}
+		assertEquals("test_spell + 8 M6d representative spells", 9, LuaSpellRegistry.size());
+	}
+
+	@Test
+	public void m6dSpellMetadataHydrates() {
+		LuaEngine.init();
+		LuaSpell portal = LuaSpellRegistry.create("town_portal");
+		assertNotNull(portal);
+		assertEquals("回城术", portal.name());
+		assertEquals(2f, portal.castTime(), 0.001f);
+		assertEquals(3, portal.spellCost());
+		assertEquals("self", portal.targeting());
+	}
+
+	@Test
 	public void createUnknownIdReturnsNull() {
 		LuaEngine.init();
 		assertFalse(LuaSpellRegistry.contains("does_not_exist"));
