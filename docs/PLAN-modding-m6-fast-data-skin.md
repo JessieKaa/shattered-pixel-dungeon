@@ -100,19 +100,36 @@ return item.init{
 
 ## Acceptance
 
-- [ ] 2-3 个 Remished 数据 item 改写成 `register_item` 格式,在 SPD 内 register + spawn 成功
-- [ ] 改写**未引入** Remished `scripts/lib/`(纯 `register_item`)
-- [ ] **未碰** `RpdApi.java`/`LuaMob.java`/`LuaSandbox.java`/`LuaEngine.java`/`LuaItem.java`(与 M6a 文件隔离,合并零冲突)
-- [ ] 产出 **C 路径成本数据**(回填本 PLAN 末尾):单 item 改写工时 + schema 适配缺口数 + 贴图处理方式 → 对照 B 路径,给 D5 建议
-- [ ] mod 关闭零影响(C3);既有 218 tests 不回归
+- [x] 2-3 个 Remished 数据 item 改写成 `register_item` 格式,在 SPD 内 register + spawn 成功(3 个,DataSkinItemTest 5/5 绿)
+- [x] 改写**未引入** Remished `scripts/lib/`(纯 `register_item`)
+- [x] **未碰** `RpdApi.java`/`LuaMob.java`/`LuaSandbox.java`/`LuaEngine.java`/`LuaItem.java`(diff 仅 3 .lua + 3 测试 + PLAN,与 M6a 文件隔离)
+- [x] 产出 **C 路径成本数据**(见下节):3 item / ~5 min 机械改写 / 2 数据缺口 + 1 类型错配 / 占位 int / D5=C 是 B 窄补充
+- [x] mod 关闭零影响(C3,`disabled_mod_loadsZeroLuaContent` 仍 0);既有测试不回归(core 223 tests,0 failures = 218 既有 + 5 新增)
 
-## C 路径成本数据(完成后回填)
+## C 路径成本数据(完成后回填 — 已回填 2026-07-06)
 
-- 改写的 item 数:__
-- 单 item 平均改写工时:__
-- LuaItem schema 缺口(price/stackable/desc 等):__
-- 贴图处理:__(占位/搬运/重绘)
-- **D5 建议**:C 是否值得作为 B 的补充 / 替代
+- **改写的 item 数**:3(rotten_organ / bone_shard / toxic_gland,均来自 Remished Plague Doctor 材料类)
+- **单 item 平均改写工时**:
+  - 纯机械改写(去 `require commonClasses/item` + `item.init/desc` 包裹,翻 6 字段):**~5 min/item**
+  - 第 1 个含 schema 探查(amortized ~15 min);2nd/3rd 各 ~5 min
+  - 含写单测 + 调两处 exact/marker 断言的全流程摊销:**~15 min/item**(3 item 总实施 ~45 min)
+- **LuaItem schema 缺口**:
+  - `price` —— hydrate 不读(走 MeleeWeapon tier-based `price()`)
+  - `stackable` —— hydrate 不读(Equip 类天生非 stackable)
+  - `imageFile` —— 单 int 占位绕过(不搬 spritesheet)
+  - `info` —— **非缺口**,直接映射到已支持的 `desc`
+  - **结构性缺口 1 个**:`LuaItem extends MeleeWeapon`,材料/消耗品/护甲类型错配
+  - 净数据缺口 = **2**(price/stackable)+ **1 类型错配**(头号成本)
+- **贴图处理**:**占位 int**(沿用 Remished image 3/4/5,不搬 materials.png —— 版权)。运行时映射 SPD ItemSpriteSheet 占位槽,视觉错位为已知局限,不在本 feature 修
+
+### **D5 建议**:C 是否值得作为 B 的补充 / 替代
+
+**结论:C 是 B 的「窄补充」,不能替代 B。**
+
+- **C 的甜蜜区(值得做)**:对**武器类** item 做纯数据 reskin —— 改名/改数值/改贴图索引,行为不变。此场景 LuaItem(MeleeWeapon)wrapper 类型匹配,~5 min/item,零 java 改动,与 M6a 隔离。批量武器皮(节日皮肤、难度变体)走 C 极划算。
+- **C 的死穴(必须走 B)**:**非武器类型**(材料、消耗品、护甲、戒指、法术)。LuaItem 是 MeleeWeapon 子类,套这些类型会产生结构性错配(本 feature 的 RottenOrgan 即示范:材料变成了"自称材料的武器",不可堆叠/不能炼金/进武器槽)。要让 C 覆盖这些类型,需新建 `LuaMaterial`/`LuaConsumable`/`LuaArmor` wrapper —— 那是 B 路径量级的工作(桥扩容 + 新 wrapper 类),违背 C「最小改动」初衷。
+- **对 M6b 的输入**:B 路径(M6b 行为脚本搬运)应**优先挑选非武器 + 有行为特色的 item**(C 处理不了的双雷区),与 C 的武器 reskin 形成互补,而非重叠。
+- **一句话**:C 管"武器换皮",B 管"新类型 + 新行为"。两者**分工互补**,B 是主力,C 是武器皮的快车道。
 
 ## Risks
 
