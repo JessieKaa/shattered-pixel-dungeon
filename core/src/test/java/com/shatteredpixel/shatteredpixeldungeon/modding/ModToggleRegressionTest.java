@@ -66,6 +66,7 @@ public class ModToggleRegressionTest {
 		assertEquals(0, LuaSpellRegistry.size());
 		assertEquals(0, LuaNpcRegistry.size());
 		assertEquals(0, LuaShopRegistry.size());
+		assertEquals("M6c: disabled mod must contribute 0 Lua buffs", 0, LuaBuffRegistry.size());
 
 		// Representative IDs across entry + every directory must be absent. Guards against a
 		// size==0 pass hiding a stray registration path.
@@ -78,6 +79,8 @@ public class ModToggleRegressionTest {
 		assertFalse("town NPCs must not load when disabled", LuaNpcRegistry.contains("town_portal"));
 		assertFalse(LuaNpcRegistry.contains("town_return"));
 		assertFalse(LuaShopRegistry.contains("test_shop"));
+		assertFalse("M6c buffs must not load when disabled", LuaBuffRegistry.contains("gases_immunity"));
+		assertFalse(LuaBuffRegistry.contains("cloak"));
 	}
 
 	@Test
@@ -111,6 +114,11 @@ public class ModToggleRegressionTest {
 		assertTrue(LuaNpcRegistry.contains("town_portal"));
 		assertTrue(LuaNpcRegistry.contains("town_return"));
 		assertTrue(LuaShopRegistry.contains("test_shop"));
+		// M6c: 16 Remished buff ports (PLAN §Steps 7). ID + exact-size guards.
+		assertTrue("M6c gases_immunity loads", LuaBuffRegistry.contains("gases_immunity"));
+		assertTrue("M6c cloak loads", LuaBuffRegistry.contains("cloak"));
+		assertTrue("M6c chaos_shield_left loads", LuaBuffRegistry.contains("chaos_shield_left"));
+		assertEquals("16 M6c buff ports", 16, LuaBuffRegistry.size());
 
 		// Exact sizes: catches a missing/misnamed script that ID-checks alone could miss.
 		assertEquals("8 item dir scripts + 1 entry item", 9, LuaItemRegistry.size());
