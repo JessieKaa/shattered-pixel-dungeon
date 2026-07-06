@@ -25,6 +25,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Cripple;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.FlavourBuff;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Haste;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Ooze;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Paralysis;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Poison;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Roots;
@@ -32,6 +33,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Slow;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.npcs.NPC;
+import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfTeleportation;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndMessage;
@@ -121,6 +123,11 @@ final class RpdApi {
         rpd.set("Buffs", buffConstants());
         rpd.set("placeBlob", new PlaceBlob());
         rpd.set("addImmunity", new AddImmunity());
+        rpd.set("setMobAi", new SetMobAi());
+        rpd.set("enemyOf", new EnemyOf());
+        rpd.set("cellDistance", new CellDistance());
+        rpd.set("emptyCellNextTo", new EmptyCellNextTo());
+        rpd.set("blink", new Blink());
         return rpd;
     }
 
@@ -606,6 +613,121 @@ final class RpdApi {
         }
     }
 
+    // ---- M6b: AI + positioning helpers ----
+
+    private static LuaMob resolveLuaMob(LuaValue idVal, String fnName) {
+        Char c = resolveChar(idVal);
+        if (c == null) return null;
+        if (!(c instanceof LuaMob)) {
+            Gdx.app.error(TAG, fnName + " only applies to LuaMob; rejected "
+                    + c.getClass().getSimpleName());
+            return null;
+        }
+        return (LuaMob) c;
+    }
+
+    private static final class SetMobAi extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue mobId, LuaValue aiTag) {
+            try {
+                LuaMob mob = resolveLuaMob(mobId, "setMobAi");
+                if (mob == null) return NIL;
+                String tag = aiTag.optjstring("");
+                if (!mob.setAiTag(tag)) {
+                    Gdx.app.error(TAG, "setMobAi rejected unknown ai tag: " + tag);
+                }
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "setMobAi threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    private static final class EnemyOf extends OneArgFunction {
+        @Override public LuaValue call(LuaValue mobId) {
+            try {
+                LuaMob mob = resolveLuaMob(mobId, "enemyOf");
+                if (mob == null) return NIL;
+                Char enemy = mob.chooseAndRememberEnemy();
+                return enemy == null ? NIL : LuaValue.valueOf(enemy.id());
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "enemyOf threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    private static final class CellDistance extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue posA, LuaValue posB) {
+            try {
+                if (Dungeon.level == null) {
+                    Gdx.app.error(TAG, "cellDistance no-op: Dungeon.level is null");
+                    return NIL;
+                }
+                if (!posA.isint() || !posB.isint()) {
+                    Gdx.app.error(TAG, "cellDistance expected int positions");
+                    return NIL;
+                }
+                int a = posA.toint();
+                int b = posB.toint();
+                if (!Dungeon.level.insideMap(a) || !Dungeon.level.insideMap(b)) {
+                    Gdx.app.error(TAG, "cellDistance rejected out-of-map positions " + a + ", " + b);
+                    return NIL;
+                }
+                return LuaValue.valueOf(Dungeon.level.distance(a, b));
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "cellDistance threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    private static final class EmptyCellNextTo extends OneArgFunction {
+        @Override public LuaValue call(LuaValue pos) {
+            try {
+                if (!pos.isint()) {
+                    Gdx.app.error(TAG, "emptyCellNextTo expected int pos, got " + pos.typename());
+                    return NIL;
+                }
+                int cell = LuaMob.findEmptyNextTo(pos.toint());
+                return cell < 0 ? NIL : LuaValue.valueOf(cell);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "emptyCellNextTo threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    private static final class Blink extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue mobId, LuaValue pos) {
+            try {
+                LuaMob mob = resolveLuaMob(mobId, "blink");
+                if (mob == null) return NIL;
+                if (Dungeon.level == null) {
+                    Gdx.app.error(TAG, "blink no-op: Dungeon.level is null");
+                    return NIL;
+                }
+                if (!pos.isint()) {
+                    Gdx.app.error(TAG, "blink expected int pos, got " + pos.typename());
+                    return NIL;
+                }
+                int cell = pos.toint();
+                if (!Dungeon.level.insideMap(cell)) {
+                    Gdx.app.error(TAG, "blink rejected out-of-map cell " + cell);
+                    return NIL;
+                }
+                if (!Dungeon.level.passable[cell] || Actor.findChar(cell) != null) {
+                    Gdx.app.error(TAG, "blink rejected blocked cell " + cell);
+                    return NIL;
+                }
+                ScrollOfTeleportation.appear(mob, cell);
+                Dungeon.level.occupyCell(mob);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "blink threw", e);
+            }
+            return NIL;
+        }
+    }
+
     /**
      * The placeable-blob whitelist. Maps a Lua-facing simple class name to the
      * Blob subclass; names not in this map are rejected by {@link PlaceBlob}.
@@ -676,6 +798,11 @@ final class RpdApi {
                 b.set(amt);
             });
             BUFF_CLASSES.put("Poison", Poison.class);
+            ENTRIES.put("Ooze", (t, amt) -> {
+                Ooze b = Buff.affect(t, Ooze.class);
+                b.set(amt);
+            });
+            BUFF_CLASSES.put("Ooze", Ooze.class);
             ENTRIES.put("Barkskin", (t, amt) -> {
                 Barkskin b = Buff.affect(t, Barkskin.class);
                 int v = Math.max(1, (int) amt);

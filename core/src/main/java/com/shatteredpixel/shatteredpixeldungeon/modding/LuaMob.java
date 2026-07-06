@@ -1,6 +1,8 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import com.badlogic.gdx.Gdx;
+import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
 import com.shatteredpixel.shatteredpixeldungeon.modding.annotations.LuaInterface;
@@ -13,6 +15,7 @@ import com.shatteredpixel.shatteredpixeldungeon.sprites.RatSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.SkeletonSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.SlimeSprite;
 import com.watabou.utils.Bundle;
+import com.watabou.utils.PathFinder;
 import com.watabou.utils.Random;
 import com.watabou.utils.Reflection;
 import org.luaj.vm2.LuaTable;
@@ -53,7 +56,8 @@ import java.util.Map;
  *   <li><b>attackProc(selfId, enemyId, baseDamage)</b> — super first, then Lua
  *       may return a number to override damage (nil/non-number keeps base).</li>
  *   <li><b>defenseProc(selfId, enemyId, baseDamage)</b> — same shape.</li>
- *   <li><b>die(selfId)</b> — super first (loot/XP/talents), then Lua notified.</li>
+ *   <li><b>die(selfId)</b> — Lua notified before upstream death cleanup, so
+ *       scripts can still resolve self position/id; then super runs loot/XP.</li>
  * </ul>
  *
  * <p>Lua never receives a {@link Char} object — only {@code int id()} (M1
@@ -229,11 +233,11 @@ public class LuaMob extends Mob {
 
 	@Override
 	public void die(Object cause) {
-		super.die(cause);
 		LuaTable tbl = luaTable();
 		if (tbl != null) {
 			LuaItemCallbacks.callOpt(tbl, "die", LuaValue.valueOf(id()));
 		}
+		super.die(cause);
 	}
 
 	@Override
@@ -245,6 +249,53 @@ public class LuaMob extends Mob {
 	@Override
 	public String description() {
 		return nameStr;
+	}
+
+	// ---- M6b AI helpers ----
+
+	public boolean setAiTag(String tag) {
+		if (tag == null) return false;
+		switch (tag.toLowerCase()) {
+			case "sleeping":
+				state = SLEEPING;
+				return true;
+			case "hunting":
+				state = HUNTING;
+				return true;
+			case "wandering":
+				state = WANDERING;
+				return true;
+			case "fleeing":
+				state = FLEEING;
+				return true;
+			case "passive":
+				state = PASSIVE;
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	public Char chooseAndRememberEnemy() {
+		if (Dungeon.level == null) return null;
+		if (fieldOfView == null || fieldOfView.length != Dungeon.level.length()) {
+			fieldOfView = new boolean[Dungeon.level.length()];
+		}
+		Dungeon.level.updateFieldOfView(this, fieldOfView);
+		enemy = chooseEnemy();
+		return enemy;
+	}
+
+	public static int findEmptyNextTo(int pos) {
+		if (Dungeon.level == null || !Dungeon.level.insideMap(pos)) return -1;
+		int[] offsets = PathFinder.NEIGHBOURS8.clone();
+		Random.shuffle(offsets);
+		for (int offset : offsets) {
+			int cell = pos + offset;
+			if (!Dungeon.level.insideMap(cell)) continue;
+			if (Dungeon.level.passable[cell] && Actor.findChar(cell) == null) return cell;
+		}
+		return -1;
 	}
 
 	// ---- Lua-driven immunity (M6a) ----
