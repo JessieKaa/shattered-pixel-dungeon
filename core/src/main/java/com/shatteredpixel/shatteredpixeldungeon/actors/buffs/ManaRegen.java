@@ -15,6 +15,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.actors.buffs;
 
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
+import com.shatteredpixel.shatteredpixeldungeon.modding.BalanceConfig;
 import com.shatteredpixel.shatteredpixeldungeon.ui.BuffIndicator;
 import com.watabou.utils.Bundle;
 
@@ -28,14 +29,16 @@ public class ManaRegen extends Buff {
 
 	private float partialRegen = 0f;
 
-	private static final float MANA_DELAY = 10f; // 1 MP every 10 turns
+	// M9c: delay now lives in BalanceConfig (default 8f, mod-overridable). Read
+	// at use so a mod's balance override takes effect without recompiling.
+	private static float manaDelay() { return BalanceConfig.MANA_REGEN_DELAY; }
 
 	@Override
 	public boolean act() {
 		if (target.isAlive() && target instanceof Hero) {
 			Hero hero = (Hero) target;
 			if (Regeneration.regenOn() && hero.MP < hero.MPMax) {
-				partialRegen += 1f / MANA_DELAY;
+				partialRegen += 1f / manaDelay();
 				if (partialRegen >= 1f) {
 					hero.MP = Math.min(hero.MPMax, hero.MP + (int) partialRegen);
 					partialRegen -= (int) partialRegen;
