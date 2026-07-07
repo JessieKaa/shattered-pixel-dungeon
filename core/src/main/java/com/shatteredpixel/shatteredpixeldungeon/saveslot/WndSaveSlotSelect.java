@@ -66,6 +66,7 @@ public class WndSaveSlotSelect extends Window {
 		TXT_ZH.put("title_load", "从槽位加载");
 		TXT_ZH.put("empty", "暂无存档槽位。");
 		TXT_ZH.put("slot_info", "%s %d层 %d级");
+		TXT_ZH.put("slot_info_mod_missing", "⚠ 缺 %d mod");
 		TXT_ZH.put("btn_new", "新建槽位");
 		TXT_ZH.put("btn_save", "保存");
 		TXT_ZH.put("btn_load", "加载");
@@ -104,6 +105,7 @@ public class WndSaveSlotSelect extends Window {
 		TXT_EN.put("title_load", "Load from Slot");
 		TXT_EN.put("empty", "No save slots yet.");
 		TXT_EN.put("slot_info", "%s D%d L%d");
+		TXT_EN.put("slot_info_mod_missing", "⚠ %d mod missing");
 		TXT_EN.put("btn_new", "New Slot");
 		TXT_EN.put("btn_save", "Save");
 		TXT_EN.put("btn_load", "Load");
@@ -441,6 +443,12 @@ public class WndSaveSlotSelect extends Window {
 
 			String info = txt( "slot_info",
 					meta.name, meta.depth, meta.level);
+			// Fork M9a: flag slots whose saved active-mod set isn't fully loaded now (items would
+			// render as ???, buffs self-detach). Legacy slots (empty snapshot) show no marker.
+			int missingMods = SaveSlotService.missingMods(meta).size();
+			if (missingMods > 0) {
+				info += " " + txt("slot_info_mod_missing", missingMods);
+			}
 			label = PixelScene.renderTextBlock(info, 7);
 			add(label);
 

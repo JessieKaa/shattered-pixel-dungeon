@@ -33,6 +33,7 @@ import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
 import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
 import com.shatteredpixel.shatteredpixeldungeon.Statistics;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
+import com.shatteredpixel.shatteredpixeldungeon.saveslot.SaveSlotService;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Blob;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.AscensionChallenge;
@@ -500,6 +501,9 @@ public class GameScene extends PixelScene {
 		log.camera = uiCamera;
 		log.newLine();
 		add( log );
+		// Fork: flush any pending save-slot mod-mismatch warning now that the GameLog is rebuilt
+		// (InterlevelScene.restore()'s wipe() would have cleared an earlier GLog entry).
+		SaveSlotService.onGameSceneReady();
 
 		if (uiSize > 0){
 			bringToFront(status);
