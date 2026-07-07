@@ -1,14 +1,14 @@
--- M6c port of Remished scripts/buffs/Counter.lua
--- Remished: per-tick damage + charAct counter via storage. M6c bridges the act
--- tick (damage the bearer by 1 each tick, decrement level, detach at 0) and
--- keeps a per-instance counter in state (isolated per Java buff instance).
+-- M7b port of Remished scripts/buffs/Counter.lua
+-- Remished: act ticks damage + level decrement + detach; charAct increments a
+-- per-instance counter and shows a status. M7b bridges both: act keeps the
+-- damage/level/detach lifecycle, charAct (fired by Actor.process every Char
+-- turn) increments state.counter — the per-Char-turn active behaviour that
+-- M6c could not express and left degraded.
 register_buff{
     id = "counter",
     name = "Counter",
-    info = "Counter (M6c: ticks damage + per-instance counter; charAct not bridged)",
+    info = "Counter (M7b: act damage/lifecycle + charAct per-turn counter)",
     icon = 46,
-    degraded = true,
-    degradation = "Remished charAct runs every Char turn; M6c has no per-Char-turn hook on a generic buff, so the counter advances on the buff's own act tick instead.",
 
     attachTo = function(targetId, state)
         state.counter = 0
@@ -16,7 +16,6 @@ register_buff{
     end,
 
     act = function(selfId, targetId, state)
-        state.counter = (state.counter or 0) + 1
         RPD.damageChar(targetId, 1)
         local lvl = RPD.buffLevel(targetId, "counter") or 1
         lvl = lvl - 1
@@ -26,5 +25,9 @@ register_buff{
         end
         RPD.setBuffLevel(targetId, "counter", lvl)
         return 1
+    end,
+
+    charAct = function(selfId, targetId, state)
+        state.counter = (state.counter or 0) + 1
     end,
 }

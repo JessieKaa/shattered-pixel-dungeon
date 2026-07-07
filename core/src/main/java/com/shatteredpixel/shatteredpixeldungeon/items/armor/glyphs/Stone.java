@@ -32,6 +32,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent;
 import com.shatteredpixel.shatteredpixeldungeon.items.armor.Armor;
 import com.shatteredpixel.shatteredpixeldungeon.items.trinkets.FerretTuft;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaBuff;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.ItemSprite;
 import com.watabou.utils.GameMath;
 
@@ -42,10 +43,25 @@ public class Stone extends Armor.Glyph {
 	@Override
 	public int proc(Armor armor, Char attacker, Char defender, int damage) {
 		
+		float accuracy;
+		float evasion;
+		// `testing` is a static, non-reentrant flag read by Stone's own
+		// defenseSkill override. Restore it in finally so a Lua callback that
+		// re-enters combat (or an unexpected throw) cannot leave it stuck true.
+		boolean wasTesting = testing;
 		testing = true;
-		float accuracy = attacker.attackSkill(defender);
-		float evasion = defender.defenseSkill(attacker);
-		testing = false;
+		try {
+			accuracy = attacker.attackSkill(defender);
+			evasion = defender.defenseSkill(attacker);
+		} finally {
+			testing = wasTesting;
+		}
+		// M7b: apply LuaBuff skill amendments here too so Stone's what-if calc
+		// sees the same to-hit/evasion Char.hit() does (mirror dispatch site).
+		// Dispatched outside the testing window so a Lua re-entry sees the
+		// restored flag state.
+		accuracy = LuaBuff.dispatchAttackSkill(attacker, accuracy);
+		evasion = LuaBuff.dispatchDefenseSkill(defender, evasion);
 
 		//FIXME this is duplicated here because these apply in hit(), not in attack/defenseskill
 		// the true solution is probably to refactor accuracy/evasion code a little bit

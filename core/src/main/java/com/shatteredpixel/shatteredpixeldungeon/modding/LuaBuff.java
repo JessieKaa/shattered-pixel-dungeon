@@ -259,6 +259,90 @@ public class LuaBuff extends Buff {
                 LuaValue.valueOf(selfId), LuaValue.valueOf(spd));
     }
 
+    // ---- M7b skill + charAct hooks ----
+    //
+    // attackSkill/defenseSkill amend the bearer's to-hit / evasion. Unlike the
+    // M7a slots, these are NOT dispatched from the Char method body: Hero and
+    // Mob override attackSkill/defenseSkill without calling super, and ~20 mob
+    // subclasses override attackSkill individually, so a base-method dispatch
+    // would silently miss them. Instead the host dispatches at the two real
+    // combat read sites — Char.hit() and Stone.proc() — via the static helpers
+    // below, which compose every attached LuaBuff in attach order.
+
+    /** Amend the bearer's attackSkill (to-hit). int in/out; float boundary at the dispatch helper. */
+    public int attackSkill(int selfId, int atk) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return atk;
+        return LuaItemCallbacks.callOptInt(tbl, "attackSkill", atk,
+                LuaValue.valueOf(selfId), LuaValue.valueOf(atk));
+    }
+
+    /** Amend the bearer's defenseSkill (evasion). int in/out; float boundary at the dispatch helper. */
+    public int defenseSkill(int selfId, int def) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return def;
+        return LuaItemCallbacks.callOptInt(tbl, "defenseSkill", def,
+                LuaValue.valueOf(selfId), LuaValue.valueOf(def));
+    }
+
+    /**
+     * Compose every attached LuaBuff's {@code attackSkill} amendment onto
+     * {@code v} (a float, matching {@link Char#hit}'s local). Used at the
+     * call site so Hero/Mob/mob-subclass overrides are all covered without
+     * editing each one.
+     */
+    public static float dispatchAttackSkill(Char self, float v) {
+        if (self == null) return v;
+        int iv = Math.round(v);
+        for (Buff b : self.buffs()) {
+            if (b instanceof LuaBuff) {
+                iv = ((LuaBuff) b).attackSkill(self.id(), iv);
+            }
+        }
+        return iv;
+    }
+
+    /** Twin of {@link #dispatchAttackSkill} for defenseSkill. */
+    public static float dispatchDefenseSkill(Char self, float v) {
+        if (self == null) return v;
+        int iv = Math.round(v);
+        for (Buff b : self.buffs()) {
+            if (b instanceof LuaBuff) {
+                iv = ((LuaBuff) b).defenseSkill(self.id(), iv);
+            }
+        }
+        return iv;
+    }
+
+    /**
+     * Fire the advisory {@code charAct} callback on every LuaBuff attached to
+     * {@code c}. Dispatched from {@code Actor.process} before the Char's own
+     * {@code act()} so it covers Hero, Mob, and every mob-subclass / LuaMob
+     * override (several skip {@code super.act()}; LuaMob skips it entirely when
+     * Lua takes over the tick). {@code charAct} is the Char-level per-tick
+     * active-behaviour hook (distinct from {@link #act}, the buff's own
+     * lifecycle timer): no return value is consumed — a script that wants to
+     * detach during charAct calls {@code RPD.detachBuff} itself.
+     */
+    public static void dispatchCharAct(Char c) {
+        if (c == null) return;
+        for (Buff b : c.buffs()) {
+            if (b instanceof LuaBuff) {
+                ((LuaBuff) b).charAct();
+            }
+        }
+    }
+
+    /** Per-tick Char-level callback; advisory (return ignored). */
+    private void charAct() {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return;
+        LuaItemCallbacks.callOpt(tbl, "charAct",
+                LuaValue.valueOf(id()),
+                target == null ? LuaValue.NIL : LuaValue.valueOf(target.id()),
+                state);
+    }
+
     @Override
     public int icon() {
         return readIntField("icon", BuffIndicator.NONE);

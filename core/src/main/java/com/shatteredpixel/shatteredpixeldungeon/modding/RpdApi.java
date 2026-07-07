@@ -51,8 +51,11 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.npcs.NPC;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
+import com.shatteredpixel.shatteredpixeldungeon.items.armor.Armor;
 import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfTeleportation;
+import com.shatteredpixel.shatteredpixeldungeon.items.weapon.Weapon;
 import com.shatteredpixel.shatteredpixeldungeon.mechanics.Ballistica;
+import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndMessage;
@@ -209,6 +212,11 @@ final class RpdApi {
         rpd.set("heroManaMax", new HeroManaMax());
         rpd.set("spendMana", new SpendMana());
         rpd.set("restoreMana", new RestoreMana());
+        // M7b hook API: belongings read + char yell. Used by encumbrance /
+        // unsuitable_item buffs (charAct random yell about an encumbering
+        // equipped item). id-resolved, no Java object crosses the sandbox.
+        rpd.set("encumbranceItemName", new EncumbranceItemName());
+        rpd.set("yell", new Yell());
         return rpd;
     }
 
@@ -539,6 +547,70 @@ final class RpdApi {
             }
         }
     }
+
+    // ---- M7b hook API: belongings read + char yell ----
+
+    /**
+     * {@code RPD.encumbranceItemName(heroId)} → name of the first equipped item
+     * whose STR requirement exceeds the hero's effective STR, or NIL. Faithful
+     * port of Remished {@code Belongings.encumbranceCheck()} (which iterates
+     * equipped items and returns the first with {@code requiredSTR() > STR()}).
+     * Hero-only: mobs have no {@link Belongings}. Only {@link Weapon} and
+     * {@link Armor} expose a STR requirement in SPD, so those are the slots
+     * checked (weapon, secondWep, armor).
+     */
+    private static final class EncumbranceItemName extends OneArgFunction {
+        @Override public LuaValue call(LuaValue heroId) {
+            try {
+                Hero h = resolveHero(heroId, "encumbranceItemName");
+                if (h == null) return NIL;
+                int str = h.STR();
+                Belongings b = h.belongings;
+                if (b.weapon() instanceof Weapon
+                        && ((Weapon) b.weapon()).STRReq() > str) {
+                    return LuaValue.valueOf(b.weapon().name());
+                }
+                if (b.secondWep() instanceof Weapon
+                        && ((Weapon) b.secondWep()).STRReq() > str) {
+                    return LuaValue.valueOf(b.secondWep().name());
+                }
+                if (b.armor() != null && b.armor().STRReq() > str) {
+                    return LuaValue.valueOf(b.armor().name());
+                }
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "encumbranceItemName threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * {@code RPD.yell(charId, text)} — write a quoted GLog line from the char
+     * ("Name: \"text\""). Mirrors {@link Mob#yell} but accepts any Char (so the
+     * hero can yell too; {@code npcYell} is NPC-only). {@code Mob.yell} is used
+     * directly for mobs to preserve its exact formatting; for non-Mob chars the
+     * same format is emitted via {@link GLog#n}.
+     */
+    private static final class Yell extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue text) {
+            try {
+                Char c = resolveChar(charId);
+                if (c == null) return NIL;
+                String line = text.optjstring("");
+                if (c instanceof Mob) {
+                    ((Mob) c).yell(line);
+                } else {
+                    GLog.newLine();
+                    GLog.n("%s: \"%s\" ", Messages.titleCase(c.name()), line);
+                }
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "yell threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    // ---- M3a spawnMob ----
 
     /**
      * {@code RPD.spawnMob(mobId, pos)} — inject a Lua-defined hostile mob at the

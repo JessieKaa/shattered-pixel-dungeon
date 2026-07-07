@@ -627,6 +627,13 @@ public abstract class Char extends Actor {
 		float acuStat = attacker.attackSkill( defender );
 		float defStat = defender.defenseSkill( attacker );
 
+		// M7b: LuaBuff skill dispatch at the call site. attackSkill/defenseSkill
+		// are overridden by Hero/Mob/mob-subclasses without super, so a base-
+		// method dispatch would miss them; the two real combat read sites are
+		// here and Stone.proc(). Lua receives only int ids + the current value.
+		acuStat = LuaBuff.dispatchAttackSkill(attacker, acuStat);
+		defStat = LuaBuff.dispatchDefenseSkill(defender, defStat);
+
 		if (defender instanceof Hero && ((Hero) defender).damageInterrupt){
 			((Hero) defender).interrupt();
 		}

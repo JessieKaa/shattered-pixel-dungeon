@@ -594,6 +594,141 @@ public class RpdApiBuffTest {
         }
     }
 
+    // ---- M7b skill + charAct + belongings hooks ----
+
+    @Test
+    public void luaBuffAttackSkillAmendsAtCallSite() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("atk_skill", tableFromLua(
+                "register_buff{ id='atk_skill', name='a', " +
+                "attackSkill=function(self,atk) return atk+10 end }", "atk_skill"));
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            LuaBuffRegistry.create("atk_skill").attachTo(h);
+            // dispatchAttackSkill composes the LuaBuff +10 onto the base value.
+            // Fresh hero attackSkill computes a non-zero value (hero default 10
+            // * accuracy); the Lua +10 must show on top of whatever Java produced.
+            int base = h.attackSkill(enemy);
+            assertEquals("dispatchAttackSkill adds Lua +10", base + 10,
+                    Math.round(LuaBuff.dispatchAttackSkill(h, base)));
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
+    }
+
+    @Test
+    public void luaBuffDefenseSkillAmendsAtCallSite() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("def_skill", tableFromLua(
+                "register_buff{ id='def_skill', name='d', " +
+                "defenseSkill=function(self,def) return def+5 end }", "def_skill"));
+        Hero h = freshHero();
+        try {
+            LuaBuffRegistry.create("def_skill").attachTo(h);
+            int base = h.defenseSkill(h);
+            assertEquals("dispatchDefenseSkill adds Lua +5", base + 5,
+                    Math.round(LuaBuff.dispatchDefenseSkill(h, base)));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void dispatchCharActFiresAdvisoryCallback() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("charact_probe", tableFromLua(
+                "register_buff{ id='charact_probe', name='c', " +
+                "charAct=function(self,t,s) s.ticks=(s.ticks or 0)+1 end }",
+                "charact_probe"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("charact_probe");
+            assertTrue(lb.attachTo(h));
+            LuaBuff.dispatchCharAct(h);
+            LuaBuff.dispatchCharAct(h);
+            assertEquals("charAct fired twice via dispatch", 2, stateInt(lb, "ticks"));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void dispatchCharActNullSafe() {
+        // No crash on null / no Lua buffs attached.
+        LuaBuff.dispatchCharAct(null);
+    }
+
+    @Test
+    public void championOfWaterDefenseSkillBonusApplies() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.affectBuff(" + h.id() + ", 'champion_of_water', 4)").call();
+            int base = h.defenseSkill(h);
+            // lvl=4 → bonus = floor(4*1.25) = 5
+            assertEquals("champion_of_water adds floor(lvl*1.25) evasion",
+                    base + 5, Math.round(LuaBuff.dispatchDefenseSkill(h, base)));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void encumbranceItemNameReturnsNilForFreshHero() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            // Fresh hero has no equipped weapon/armor → no encumbrance → nil.
+            LuaValue r = g.load("return RPD.encumbranceItemName(" + h.id() + ")").call();
+            assertTrue("no encumbrance on fresh hero", r.isnil());
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void encumbranceItemNameRejectsNonHero() throws Exception {
+        LuaEngine.init();
+        // Build a non-hero Char via LuaMob? Simpler: pass a bogus id → nil.
+        Globals g = LuaEngine.instance().globals();
+        LuaValue r = g.load("return RPD.encumbranceItemName(999999)").call();
+        assertTrue("bogus hero id → nil", r.isnil());
+    }
+
+    @Test
+    public void yellAcceptsAnyCharWithoutThrowing() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            // Hero is not a Mob → exercises the GLog.n branch. Just must not throw.
+            g.load("RPD.yell(" + h.id() + ", 'test yell')").call();
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void counterCharActIncrementsStateCounter() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.affectBuff(" + h.id() + ", 'counter', 2)").call();
+            LuaBuff lb = findLuaBuff(h, "counter");
+            assertNotNull(lb);
+            LuaBuff.dispatchCharAct(h);
+            LuaBuff.dispatchCharAct(h);
+            assertEquals("counter charAct increments state.counter", 2, stateInt(lb, "counter"));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
     // ---- M7a stolen loot persistence ----
 
     @Test

@@ -27,6 +27,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Blob;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
 import com.shatteredpixel.shatteredpixeldungeon.levels.VaultLevel;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaBuff;
 import com.watabou.noosa.Game;
 import com.watabou.utils.Bundlable;
 import com.watabou.utils.Bundle;
@@ -291,6 +292,13 @@ public abstract class Actor implements Bundlable {
 					doNext = false;
 					current = null;
 				} else {
+					// M7b: fire per-tick Char-level LuaBuff charAct before the
+					// Char's own act(). Actor.process is the only scheduler
+					// point that covers Hero, Mob, and every mob-subclass /
+					// LuaMob override (several skip super.act()).
+					if (acting instanceof Char) {
+						LuaBuff.dispatchCharAct((Char) acting);
+					}
 					doNext = acting.act();
 					if (doNext && (Dungeon.hero == null || !Dungeon.hero.isAlive())) {
 						doNext = false;
