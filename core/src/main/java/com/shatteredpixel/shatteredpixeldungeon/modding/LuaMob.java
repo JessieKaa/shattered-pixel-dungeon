@@ -77,6 +77,7 @@ public class LuaMob extends Mob {
 	private static final String LUA_MOB_ID = "lua_mob_id";
 	private static final String LUA_SPAWNED = "lua_spawned";
 	private static final String LUA_IMMUNITY_CLASSES = "lua_immunity_classes";
+	private static final String STOLEN_LOOT = "lua_stolen_loot";
 
 	private String luaMobId;
 	private String nameStr = "???";
@@ -323,9 +324,10 @@ public class LuaMob extends Mob {
 	 * same path vanilla mobs use for {@code loot = new Dewdrop()}. {@code loot}
 	 * is {@code protected} in {@link Mob}; cross-package subclass access via
 	 * {@code this.loot} is legal. Setting {@code lootChance = 1} guarantees the
-	 * drop fires. <b>Persistence gap (M6e):</b> {@link Mob#storeInBundle} does
-	 * not persist a generic {@code Item} loot, so a stolen item does not survive
-	 * save/load — recorded as an M6e risk, not fixed here.
+	 * drop fires. <b>Persistence (M7a):</b> {@link #storeInBundle} persists the
+	 * stolen item via the {@link #STOLEN_LOOT} bundle key and
+	 * {@link #restoreFromBundle} rehydrates it, so a stolen drop survives
+	 * save/load (Mob.storeInBundle itself does not persist a generic Item loot).
 	 */
 	public void stolenLoot(Item item) {
 		loot = item;
@@ -345,6 +347,12 @@ public class LuaMob extends Mob {
 		bundle.put(LUA_SPAWNED, spawned);
 		if (!luaImmunityClassNames.isEmpty()) {
 			bundle.put(LUA_IMMUNITY_CLASSES, luaImmunityClassNames.toArray(new String[0]));
+		}
+		// Persist a stolen Item loot so the drop survives save/load. Mob's own
+		// storeInBundle skips loot entirely (vanilla mobs re-derive it from their
+		// class); a stolen item is runtime state and would be lost without this.
+		if (loot instanceof Item) {
+			bundle.put(STOLEN_LOOT, (Item) loot);
 		}
 	}
 
@@ -382,6 +390,12 @@ public class LuaMob extends Mob {
 					Gdx.app.error(TAG, "restore lua immunity " + fqcn + " failed", e);
 				}
 			}
+		}
+		// Rehydrate a stolen Item loot. lootChance=1 so createLoot() still fires
+		// the drop after restore.
+		if (bundle.contains(STOLEN_LOOT)) {
+			loot = bundle.get(STOLEN_LOOT);
+			lootChance = 1f;
 		}
 	}
 }

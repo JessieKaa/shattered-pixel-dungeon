@@ -26,6 +26,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Blindness;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Bless;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Burning;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Charm;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Chill;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Cripple;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Drowsy;
@@ -41,6 +42,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Roots;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Sleep;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Slow;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Speed;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Terror;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vulnerable;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Weakness;
@@ -1100,6 +1102,10 @@ final class RpdApi {
             putFlavour("Weakness", Weakness.class);
             putFlavour("Vulnerable", Vulnerable.class);
             putFlavour("Chill", Chill.class);
+            // M7a: Charm/Terror are FlavourBuff subclasses, covered by the same
+            // prolong(target,clazz,duration) strategy as the M6c flavour entries.
+            putFlavour("Charm", Charm.class);
+            putFlavour("Terror", Terror.class);
             // Level-based buffs with type-specific setters.
             ENTRIES.put("Bleeding", (t, amt) -> {
                 Bleeding b = Buff.affect(t, Bleeding.class);

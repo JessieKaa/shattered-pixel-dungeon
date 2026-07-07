@@ -157,6 +157,8 @@ import com.watabou.utils.Bundle;
 import com.watabou.utils.PathFinder;
 import com.watabou.utils.Random;
 
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaBuff;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -708,6 +710,12 @@ public abstract class Char extends Actor {
 
 		dr += Random.NormalIntRange( 0 , Barkskin.currentLevel(this) );
 
+		for (Buff b : buffs()) {
+			if (b instanceof LuaBuff) {
+				dr = ((LuaBuff) b).drRoll(id(), dr);
+			}
+		}
+
 		return dr;
 	}
 	
@@ -721,6 +729,15 @@ public abstract class Char extends Actor {
 	public int attackProc( Char enemy, int damage ) {
 		for (ChampionEnemy buff : buffs(ChampionEnemy.class)){
 			buff.onAttackProc( enemy );
+		}
+		// LuaBuff dispatch: iterate the ordered buffs() view so multiple Lua
+		// buffs compose in attach order (buffs(LuaBuff.class) returns a HashSet
+		// with unspecified order). buffs() returns a fresh snapshot, so a Lua
+		// callback that detaches itself (e.g. ManaShield) is safe mid-iteration.
+		for (Buff b : buffs()) {
+			if (b instanceof LuaBuff) {
+				damage = ((LuaBuff) b).attackProc(id(), enemy.id(), damage);
+			}
 		}
 		return damage;
 	}
@@ -756,6 +773,11 @@ public abstract class Char extends Actor {
 			}
 		}
 
+		for (Buff b : buffs()) {
+			if (b instanceof LuaBuff) {
+				damage = ((LuaBuff) b).defenseProc(id(), enemy.id(), damage);
+			}
+		}
 		return damage;
 	}
 
@@ -783,6 +805,12 @@ public abstract class Char extends Actor {
 		speed *= Swiftness.speedBoost(this, glyphLevel(Swiftness.class));
 		speed *= Flow.speedBoost(this, glyphLevel(Flow.class));
 		speed *= Bulk.speedBoost(this, glyphLevel(Bulk.class));
+
+		for (Buff b : buffs()) {
+			if (b instanceof LuaBuff) {
+				speed = ((LuaBuff) b).speed(id(), speed);
+			}
+		}
 
 		return speed;
 	}
