@@ -40,14 +40,55 @@ public final class ModScanner {
 			safeLog(TAG, "Gdx.files null, mod scan skipped", null);
 			return Collections.emptyList();
 		}
-		return scanDir(Gdx.files.internal("mods"));
+		return scanChildren(listModDirs());
+	}
+
+	/**
+	 * Two-stage enumeration of {@code mods/} child directories.
+	 *
+	 * <p>Stage 1 (classpath-as-filesystem): {@code Gdx.files.internal("mods").list()} returns an
+	 * empty array on desktop LWJGL3 when {@code mods/} only exists on the classpath (same quirk
+	 * {@link LuaEngine}'s script loaders work around). {@code ClassLoader.getResource("mods")}
+	 * resolves to a real {@code file:} URL in unpacked desktop runs and tests, so we list the
+	 * {@link java.io.File} directly and wrap each child in {@link Gdx#files#absolute(String)}.
+	 *
+	 * <p>Stage 2 (libgdx fallback): {@code Gdx.files.internal("mods").list()} works on Android
+	 * ({@code AssetManager.list}) and packaged jars.
+	 */
+	private static FileHandle[] listModDirs() {
+		try {
+			java.net.URL dirUrl = ModScanner.class.getClassLoader().getResource("mods");
+			if (dirUrl != null && "file".equals(dirUrl.getProtocol())) {
+				java.io.File dirFile = new java.io.File(dirUrl.toURI());
+				java.io.File[] dirs = dirFile.listFiles(java.io.File::isDirectory);
+				if (dirs != null && dirs.length > 0) {
+					FileHandle[] out = new FileHandle[dirs.length];
+					for (int i = 0; i < dirs.length; i++) {
+						out[i] = Gdx.files.absolute(dirs[i].getAbsolutePath());
+					}
+					return out;
+				}
+			}
+		} catch (Exception e) {
+			safeLog(TAG, "Classpath-FS enumeration of mods failed, falling back", e);
+		}
+		try {
+			FileHandle base = Gdx.files.internal("mods");
+			if (base != null && base.exists()) return base.list();
+		} catch (Exception e) {
+			safeLog(TAG, "Gdx fallback list of mods failed", e);
+		}
+		return new FileHandle[0];
 	}
 
 	public static List<ModManifest> scanDir(FileHandle baseDir) {
 		if (baseDir == null || !baseDir.exists()) {
 			return Collections.emptyList();
 		}
-		FileHandle[] rawChildren = baseDir.list();
+		return scanChildren(baseDir.list());
+	}
+
+	private static List<ModManifest> scanChildren(FileHandle[] rawChildren) {
 		if (rawChildren == null || rawChildren.length == 0) {
 			return Collections.emptyList();
 		}
