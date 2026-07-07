@@ -1,0 +1,10 @@
+{
+  "id": "demo_m58",
+  "name": "M5-M8 测试包",
+  "version": "0.1.0",
+  "spd_version": 896,
+  "author": "fork",
+  "default_enabled": false,
+  "entry": "init.lua",
+  "description": "M5-M8 modding API 综合演示(combat hook/mana/shield/tint/sleep-lock/talent-new/on_upgrade/talent-override)"
+}
