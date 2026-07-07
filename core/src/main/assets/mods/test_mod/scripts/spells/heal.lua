@@ -7,6 +7,7 @@ register_spell {
     desc = "恢复施法者部分生命值。",
     image = 2,
     castTime = 1,
+    useMode = "mana",
     spellCost = 5,
     targeting = "self",
 

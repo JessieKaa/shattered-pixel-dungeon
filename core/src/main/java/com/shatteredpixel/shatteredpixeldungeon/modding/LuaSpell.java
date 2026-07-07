@@ -61,6 +61,9 @@ public class LuaSpell extends Item {
 	private float castTime = TIME_TO_USE;
 	private int spellCost = 0;
 	private String targeting = "self";
+	// M7d: "consumable" (legacy — detach on use) or "mana" (spend hero.MP, no
+	// detach). Defaults to consumable so existing spell defs are unchanged.
+	private String useMode = "consumable";
 
 	{
 		stackable = true;
@@ -82,12 +85,19 @@ public class LuaSpell extends Item {
 		nameStr = tbl.get("name").checkjstring();
 		descStr = tbl.get("desc").optjstring("");
 		image = tbl.get("image").optint(0);
-		// M6d: optional Remished-style metadata. Cast time overrides the default
-		// 1f spend; spellCost/targeting are stored for future UI and do not affect
-		// consumption. Restored via the same Lua table after save/load (the table
-		// is the source of truth, never the bundle).
+		// M6d/M7d: optional Remished-style metadata. Cast time overrides the
+		// default 1f spend. spellCost + useMode drive the M7d mana track;
+		// targeting drives the M7c selectCell path. All restored via the same
+		// Lua table after save/load (the table is the source of truth, never
+		// the bundle).
 		castTime = (float) tbl.get("castTime").optdouble(TIME_TO_USE);
-		spellCost = tbl.get("spellCost").optint(0);
+		// M7d: spellCost is now a live cost (mana mode deducts it). Clamp >= 0 so
+		// a negative value can't invert `MP -= spellCost` into a mana gain.
+		spellCost = Math.max(0, tbl.get("spellCost").optint(0));
+		// M7d: useMode selects the consumption track. Unknown/missing → consumable
+		// (zero regression for pre-M7d spell defs).
+		String m = tbl.get("useMode").optjstring("consumable");
+		useMode = "mana".equals(m) ? "mana" : "consumable";
 		// M7c: targeting is now active. self = cast on self (legacy onUse path);
 		// cell/enemy = pop GameScene.selectCell and fire onUseAt(heroId, cellId).
 		// Bad/unknown values fall back to self. usesTargeting aligns the quickslot
@@ -160,9 +170,31 @@ public class LuaSpell extends Item {
 		};
 	}
 
-	/** Consumption section (M7c owns; M7d will swap detach for a mana useMode). */
-	private void applySelf(Hero hero) {
+	/**
+	 * M7d consumption dispatcher. {@code useMode} selects the track:
+	 * <ul>
+	 *   <li><b>consumable</b> (default) — {@code detach(backpack)}, the legacy
+	 *       one-shot economy. Returns true unconditionally (detach never fails).</li>
+	 *   <li><b>mana</b> — spend {@code hero.MP}. Returns false if the hero is
+	 *       short, so the caller can bail before spending time / firing onUse.</li>
+	 * </ul>
+	 */
+	boolean consume(Hero hero) {
+		if ("mana".equals(useMode)) {
+			if (hero.MP < spellCost) return false;
+			hero.MP -= spellCost;
+			return true;
+		}
 		detach(hero.belongings.backpack);
+		return true;
+	}
+
+	/** Consumption section (M7c owns the structure; M7d swaps detach for consume). */
+	private void applySelf(Hero hero) {
+		if (!consume(hero)) {
+			GLog.w("Not enough mana");
+			return;
+		}
 		LuaTable tbl = luaTable();
 		if (tbl != null) {
 			LuaItemCallbacks.callOpt(tbl, "onUse", LuaValue.valueOf(hero.id()));
@@ -173,7 +205,10 @@ public class LuaSpell extends Item {
 
 	/** Consumption section for cell/enemy targeting — runs only after a valid target is chosen. */
 	private void applyAtCell(Hero hero, int cell) {
-		detach(hero.belongings.backpack);
+		if (!consume(hero)) {
+			GLog.w("Not enough mana");
+			return;
+		}
 		LuaTable tbl = luaTable();
 		if (tbl != null) {
 			LuaItemCallbacks.callOpt(tbl, "onUseAt",
@@ -221,6 +256,10 @@ public class LuaSpell extends Item {
 
 	public String targeting() {
 		return targeting;
+	}
+
+	public String useMode() {
+		return useMode;
 	}
 
 	@Override
