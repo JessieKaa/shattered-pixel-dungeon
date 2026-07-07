@@ -1,14 +1,13 @@
--- M6c port of Remished scripts/buffs/ManaShield.lua
--- Remished: defenceProc blocks one hit (damage->0) then detaches. M6c has no
--- defenceProc hook on a generic Lua buff, so the one-hit-block is degraded to
--- a metadata-only marker; the timed detach is preserved.
+-- M7a port of Remished scripts/buffs/ManaShield.lua
+-- Remished: defenceProc blocks one hit (damage->0) then detaches. M7a wires
+-- defenseProc via the new LuaBuff hook; the block fires once and the buff
+-- detaches itself. Self-detach mid-dispatch is safe because Char iterates a
+-- fresh buffs() snapshot.
 register_buff{
     id = "mana_shield",
     name = "ManaShield",
-    info = "ManaShield (M6c degraded: one-hit block not bridged)",
+    info = "ManaShield (M7a: blocks one hit, damage->0, then detaches)",
     icon = 49,
-    degraded = true,
-    degradation = "Remished defenceProc returns 0 damage once then detaches; M6c has no generic buff defenceProc hook, so the block effect is not active.",
 
     attachTo = function(targetId, state)
         return true
@@ -16,5 +15,11 @@ register_buff{
 
     act = function(selfId, targetId, state)
         return false
+    end,
+
+    defenseProc = function(selfId, enemyId, damage)
+        -- absorb one hit completely, then consume the shield
+        RPD.detachBuff(selfId, "mana_shield")
+        return 0
     end,
 }

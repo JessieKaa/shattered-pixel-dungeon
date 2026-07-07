@@ -1,15 +1,18 @@
--- M6c port of Remished scripts/buffs/ChampionOfAir.lua
--- Remished: hasteLevel + glow tint. M6c has no hasteLevel/glow hook on a
--- generic Lua buff, so the haste effect is degraded; metadata + lifecycle only.
+-- M7a port of Remished scripts/buffs/ChampionOfAir.lua
+-- Remished: hasteLevel + glow tint. M7a bridges the haste effect via the new
+-- speed hook (*1.5). The glow tint needs a sprite/visual hook not in this
+-- feature set and stays deferred to M7b.
 register_buff{
     id = "champion_of_air",
     name = "ChampionOfAir",
-    info = "ChampionOfAir (M6c degraded: hasteLevel/glow not bridged)",
+    info = "ChampionOfAir (M7a: haste via speed hook; glow tint M7b)",
     icon = 0,
-    degraded = true,
-    degradation = "hasteLevel needs a Char speed hook not exposed in M6c; glow tint needs a sprite hook. Metadata + attach/detach only.",
 
     attachTo = function(targetId, state)
         return true
+    end,
+
+    speed = function(selfId, spd)
+        return spd * 1.5
     end,
 }

@@ -217,6 +217,48 @@ public class LuaBuff extends Buff {
         super.detach();
     }
 
+    // ---- combat numerical hooks (M7a) ----
+    //
+    // Each slot mirrors the upstream Char hook name. The host Char dispatches
+    // its computed value through every attached LuaBuff in attach order
+    // (buffs(LuaBuff.class) iteration is a stable LinkedHashSet), so multiple
+    // Lua buffs compose deterministically. Lua receives only int ids + the
+    // current int/float value (D5'-(a): never a Char object); a missing
+    // function, Lua error, or non-numeric return passes the value through
+    // unchanged so a broken script never freezes combat.
+
+    /** Amend outgoing damage on the bearer's own attack. */
+    public int attackProc(int selfId, int enemyId, int damage) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return damage;
+        return LuaItemCallbacks.callOptInt(tbl, "attackProc", damage,
+                LuaValue.valueOf(selfId), LuaValue.valueOf(enemyId), LuaValue.valueOf(damage));
+    }
+
+    /** Amend incoming damage before it is applied to the bearer. */
+    public int defenseProc(int selfId, int enemyId, int damage) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return damage;
+        return LuaItemCallbacks.callOptInt(tbl, "defenseProc", damage,
+                LuaValue.valueOf(selfId), LuaValue.valueOf(enemyId), LuaValue.valueOf(damage));
+    }
+
+    /** Amend the bearer's damage-reduction roll (armor-style DR). */
+    public int drRoll(int selfId, int dr) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return dr;
+        return LuaItemCallbacks.callOptInt(tbl, "drRoll", dr,
+                LuaValue.valueOf(selfId), LuaValue.valueOf(dr));
+    }
+
+    /** Amend the bearer's movement-speed multiplier (float). */
+    public float speed(int selfId, float spd) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return spd;
+        return LuaItemCallbacks.callOptFloat(tbl, "speed", spd,
+                LuaValue.valueOf(selfId), LuaValue.valueOf(spd));
+    }
+
     @Override
     public int icon() {
         return readIntField("icon", BuffIndicator.NONE);

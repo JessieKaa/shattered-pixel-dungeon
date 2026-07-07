@@ -9,9 +9,13 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.ToxicGas;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Bleeding;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Charm;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Paralysis;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Terror;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
+import com.shatteredpixel.shatteredpixeldungeon.items.Gold;
+import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
 import com.watabou.utils.Bundle;
 import org.junit.AfterClass;
@@ -404,6 +408,224 @@ public class RpdApiBuffTest {
             LuaValue r = g.load("return RPD.buffLevel(" + h.id() + ", 'lvl_probe')").call();
             assertTrue("buffLevel returns the level", r.isnumber());
             assertEquals(7, r.toint());
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    // ---- M7a combat hooks (attackProc/defenseProc/drRoll/speed) ----
+
+    @Test
+    public void luaBuffAttackProcAmendsDamage() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("atk_probe", tableFromLua(
+                "register_buff{ id='atk_probe', name='a', " +
+                "attackProc=function(self,enemy,dmg) return dmg+5 end }", "atk_probe"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("atk_probe");
+            assertTrue(lb.attachTo(h));
+            assertEquals("attackProc Lua callback adds 5", 15, lb.attackProc(h.id(), 999, 10));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void luaBuffDefenseProcAmendsDamage() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("def_probe", tableFromLua(
+                "register_buff{ id='def_probe', name='d', " +
+                "defenseProc=function(self,enemy,dmg) return math.floor(dmg/2) end }", "def_probe"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("def_probe");
+            assertTrue(lb.attachTo(h));
+            assertEquals("defenseProc Lua callback halves", 5, lb.defenseProc(h.id(), 999, 10));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void luaBuffDrRollAmendsDr() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("dr_probe", tableFromLua(
+                "register_buff{ id='dr_probe', name='dr', " +
+                "drRoll=function(self,dr) return dr+3 end }", "dr_probe"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("dr_probe");
+            assertTrue(lb.attachTo(h));
+            assertEquals("drRoll Lua callback adds 3", 13, lb.drRoll(h.id(), 10));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void luaBuffSpeedAmendsFloat() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("spd_probe", tableFromLua(
+                "register_buff{ id='spd_probe', name='sp', " +
+                "speed=function(self,spd) return spd*1.5 end }", "spd_probe"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("spd_probe");
+            assertTrue(lb.attachTo(h));
+            assertEquals("speed Lua callback multiplies (float)", 15.0f, lb.speed(h.id(), 10.0f), 0.001f);
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void luaBuffCallbackNilPassthrough() throws Exception {
+        LuaBuffRegistry.clear();
+        // No proc fields at all → every callback must pass the value through.
+        LuaBuffRegistry.register("passthrough", tableFromLua(
+                "register_buff{ id='passthrough', name='p' }", "passthrough"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("passthrough");
+            assertTrue(lb.attachTo(h));
+            assertEquals("attackProc nil → passthrough", 10, lb.attackProc(h.id(), 999, 10));
+            assertEquals("defenseProc nil → passthrough", 10, lb.defenseProc(h.id(), 999, 10));
+            assertEquals("drRoll nil → passthrough", 4, lb.drRoll(h.id(), 4));
+            assertEquals("speed nil → passthrough", 7.0f, lb.speed(h.id(), 7.0f), 0.001f);
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void charDispatchesDrRollToLuaBuff() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("dr2", tableFromLua(
+                "register_buff{ id='dr2', name='d', drRoll=function(self,dr) return dr+3 end }", "dr2"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("dr2");
+            lb.attachTo(h);
+            // Fresh hero: no Barkskin, no armor/weapon DR → Char.drRoll dispatch
+            // is the only contributor, so h.drRoll() == the LuaBuff's +3.
+            assertEquals("Char.drRoll dispatches to attached LuaBuff", 3, h.drRoll());
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void charDispatchesAttackProcToLuaBuff() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("atk2", tableFromLua(
+                "register_buff{ id='atk2', name='a', " +
+                "attackProc=function(self,enemy,dmg) return dmg+5 end }", "atk2"));
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            LuaBuffRegistry.create("atk2").attachTo(h);
+            // Fresh hero, no weapon/talent → the only damage delta is the LuaBuff +5.
+            assertEquals("Char.attackProc dispatches to attached LuaBuff", 15, h.attackProc(enemy, 10));
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
+    }
+
+    @Test
+    public void charDispatchesDefenseProcToLuaBuff() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("def2", tableFromLua(
+                "register_buff{ id='def2', name='d', " +
+                "defenseProc=function(self,enemy,dmg) return math.floor(dmg/2) end }", "def2"));
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            LuaBuffRegistry.create("def2").attachTo(h);
+            assertEquals("Char.defenseProc dispatches to attached LuaBuff", 5, h.defenseProc(enemy, 10));
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
+    }
+
+    @Test
+    public void multipleLuaBuffsComposeInAttachOrder() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("doubler", tableFromLua(
+                "register_buff{ id='doubler', name='x2', " +
+                "attackProc=function(self,enemy,dmg) return dmg*2 end }", "doubler"));
+        LuaBuffRegistry.register("adder", tableFromLua(
+                "register_buff{ id='adder', name='plus', " +
+                "attackProc=function(self,enemy,dmg) return dmg+10 end }", "adder"));
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            // Attach doubler first, then adder. Ordered dispatch (buffs() is a
+            // LinkedHashSet snapshot): (10*2)+10 = 30. Reversed order would be 40.
+            LuaBuffRegistry.create("doubler").attachTo(h);
+            LuaBuffRegistry.create("adder").attachTo(h);
+            assertEquals("LuaBuff dispatch composes in attach order", 30, h.attackProc(enemy, 10));
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
+    }
+
+    @Test
+    public void manaShieldDetachesSelfDuringDefenseProc() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("self_detach", tableFromLua(
+                "register_buff{ id='self_detach', name='sd', " +
+                "defenseProc=function(self,enemy,dmg) RPD.detachBuff(self,'self_detach') return 0 end }",
+                "self_detach"));
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            LuaBuffRegistry.create("self_detach").attachTo(h);
+            assertNotNull(findLuaBuff(h, "self_detach"));
+            assertEquals("self-detach buff nullifies the hit", 0, h.defenseProc(enemy, 10));
+            assertEquals("self-detach removed the buff mid-dispatch (no CME)",
+                    null, findLuaBuff(h, "self_detach"));
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
+    }
+
+    // ---- M7a stolen loot persistence ----
+
+    @Test
+    public void stolenLootSurvivesBundleRoundTrip() {
+        LuaMob src = new LuaMob();
+        src.stolenLoot(new Gold(50));
+        assertNotNull("stolen loot staged on source mob", src.stolenLoot());
+
+        Bundle bundle = new Bundle();
+        src.storeInBundle(bundle);
+
+        LuaMob restored = new LuaMob();
+        restored.restoreFromBundle(bundle);
+        Item loot = restored.createLoot();
+        assertTrue("restored loot is the stolen Gold", loot instanceof Gold);
+        assertEquals("restored loot keeps its quantity", 50, loot.quantity());
+    }
+
+    // ---- M7a Charm/Terror whitelist ----
+
+    @Test
+    public void charmAndTerrorAreWhitelisted() throws Exception {
+        assertNotNull("Charm resolvable in BuffWhitelist", RpdApi.BuffWhitelist.lookupClass("Charm"));
+        assertNotNull("Terror resolvable in BuffWhitelist", RpdApi.BuffWhitelist.lookupClass("Terror"));
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.affectBuff(" + h.id() + ", 'Charm', 5)").call();
+            g.load("RPD.affectBuff(" + h.id() + ", 'Terror', 5)").call();
+            assertNotNull("Charm applied via whitelist", h.buff(Charm.class));
+            assertNotNull("Terror applied via whitelist", h.buff(Terror.class));
         } finally {
             Actor.remove(h);
         }

@@ -67,6 +67,31 @@ final class LuaItemCallbacks {
         }
     }
 
+    /**
+     * Float-returning twin of {@link #callOptInt}, for callbacks that override a
+     * {@code float} host value (e.g. {@code Char#speed()}). Same failure contract:
+     * no field / Lua error / non-numeric / nil returns {@code fallback} so the
+     * host keeps its upstream-computed value.
+     */
+    static float callOptFloat(LuaTable table, String fnName, float fallback, LuaValue... args) {
+        if (table == null) return fallback;
+        try {
+            LuaValue fn = table.get(fnName);
+            if (!fn.isfunction()) return fallback;
+            Varargs res = fn.invoke(LuaValue.varargsOf(args));
+            LuaValue first = res.arg1();
+            if (first.isnil()) return fallback;
+            if (!first.isnumber()) {
+                Gdx.app.error(TAG, "callback " + fnName + " returned non-number " + first.typename() + "; using fallback");
+                return fallback;
+            }
+            return (float) first.todouble();
+        } catch (Exception e) {
+            Gdx.app.error(TAG, "callback " + fnName + " threw", e);
+            return fallback;
+        }
+    }
+
     /** Convenience: wrap an int char id as a LuaValue argument. */
     static LuaValue arg(int charId) {
         return LuaValue.valueOf(charId);
