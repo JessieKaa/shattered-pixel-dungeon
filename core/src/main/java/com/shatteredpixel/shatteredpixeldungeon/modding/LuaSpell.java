@@ -1,8 +1,14 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
+import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.modding.annotations.LuaInterface;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.CellSelector;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
+import com.shatteredpixel.shatteredpixeldungeon.ui.QuickSlotButton;
+import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.watabou.utils.Bundle;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
@@ -82,7 +88,13 @@ public class LuaSpell extends Item {
 		// is the source of truth, never the bundle).
 		castTime = (float) tbl.get("castTime").optdouble(TIME_TO_USE);
 		spellCost = tbl.get("spellCost").optint(0);
-		targeting = tbl.get("targeting").optjstring("self");
+		// M7c: targeting is now active. self = cast on self (legacy onUse path);
+		// cell/enemy = pop GameScene.selectCell and fire onUseAt(heroId, cellId).
+		// Bad/unknown values fall back to self. usesTargeting aligns the quickslot
+		// auto-aim reticle with the Wand template (QuickSlotButton.autoAim).
+		String t = tbl.get("targeting").optjstring("self");
+		targeting = (t.equals("self") || t.equals("cell") || t.equals("enemy")) ? t : "self";
+		usesTargeting = "cell".equals(targeting) || "enemy".equals(targeting);
 	}
 
 	private LuaTable luaTable() {
@@ -101,17 +113,74 @@ public class LuaSpell extends Item {
 		// Base class sets curUser/curItem and dispatches AC_DROP/AC_THROW.
 		super.execute(hero, action);
 		if (action.equals(AC_USE)) {
-			// Detach first (Food.java:76): even if the Lua callback throws,
-			// the item is consumed. detach() handles quantity internally
-			// (quantity==1 → detachAll, quantity>1 → split(1)) — never hand-write quantity--.
-			detach(hero.belongings.backpack);
-			LuaTable tbl = luaTable();
-			if (tbl != null) {
-				LuaItemCallbacks.callOpt(tbl, "onUse", LuaValue.valueOf(hero.id()));
+			if ("cell".equals(targeting) || "enemy".equals(targeting)) {
+				// M7c: defer consumption to the selectCell callback so cancel = no
+				// consume. Do NOT hero.busy() here — busy() sets ready=false and
+				// GameScene.selectCell copies that into cellSelector.enabled, which
+				// would disable the selector on install (clicks fall through to
+				// GameScene.cancel and applyAtCell never fires). Mirrors Wand.execute.
+				// busy/spend live inside applyAtCell (the consumption section, M7d).
+				GameScene.selectCell(targetListener(hero));
+			} else {
+				applySelf(hero);
 			}
-			hero.spend(castTime);
-			hero.busy();
 		}
+	}
+
+	@Override
+	public int targetingPos(Hero user, int dst) {
+		// M7c: pass-through for cell/enemy so quickslot autoAim points at the
+		// tapped cell rather than a Ballistica collision pos (default throwPos).
+		if ("cell".equals(targeting) || "enemy".equals(targeting)) return dst;
+		return super.targetingPos(user, dst);
+	}
+
+	private CellSelector.Listener targetListener(Hero hero) {
+		final boolean enemy = "enemy".equals(targeting);
+		return new CellSelector.Listener() {
+			@Override
+			public void onSelect(Integer cell) {
+				if (cell == null) return; // cancel (CellSelector.cancel → onSelect(null))
+				Char ch = Actor.findChar(cell);
+				if (enemy) {
+					if (ch == null || ch.alignment != Char.Alignment.ENEMY) {
+						GLog.w("Select an enemy");
+						return; // non-enemy cell: reject, no consume
+					}
+					QuickSlotButton.target(ch);
+				} else if (ch != null) {
+					QuickSlotButton.target(ch); // refresh quickslot lastTarget (Wand L712-714)
+				}
+				applyAtCell(hero, cell);
+			}
+			@Override
+			public String prompt() {
+				return enemy ? "Select an enemy" : "Select a target";
+			}
+		};
+	}
+
+	/** Consumption section (M7c owns; M7d will swap detach for a mana useMode). */
+	private void applySelf(Hero hero) {
+		detach(hero.belongings.backpack);
+		LuaTable tbl = luaTable();
+		if (tbl != null) {
+			LuaItemCallbacks.callOpt(tbl, "onUse", LuaValue.valueOf(hero.id()));
+		}
+		hero.spend(castTime);
+		hero.busy();
+	}
+
+	/** Consumption section for cell/enemy targeting — runs only after a valid target is chosen. */
+	private void applyAtCell(Hero hero, int cell) {
+		detach(hero.belongings.backpack);
+		LuaTable tbl = luaTable();
+		if (tbl != null) {
+			LuaItemCallbacks.callOpt(tbl, "onUseAt",
+					LuaValue.valueOf(hero.id()), LuaValue.valueOf(cell));
+		}
+		hero.spend(castTime);
+		hero.busy();
 	}
 
 	@Override

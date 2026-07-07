@@ -116,10 +116,13 @@ public class LuaSpellTest {
 		LuaEngine.init();
 		LuaSpell portal = LuaSpellRegistry.create("town_portal");
 		assertNotNull(portal);
-		assertEquals("回城术", portal.name());
+		assertEquals("传送术", portal.name());
 		assertEquals(2f, portal.castTime(), 0.001f);
 		assertEquals(3, portal.spellCost());
-		assertEquals("self", portal.targeting());
+		// M7c: town_portal migrated from self (enterTown) to cell (teleportChar).
+		assertEquals("cell", portal.targeting());
+		assertTrue("cell targeting must set usesTargeting for quickslot auto-aim",
+				portal.usesTargeting);
 	}
 
 	@Test
@@ -294,6 +297,91 @@ public class LuaSpellTest {
 		assertEquals(1, detached.quantity());
 		assertEquals("split copy re-hydrates from the registry",
 				"测试法术 (Lua)", detached.name());
+	}
+
+	// ---- M7c targeting (self/cell/enemy) ----
+
+	/**
+	 * M7c targeting hydrates the three valid values and flips {@code usesTargeting}
+	 * for cell/enemy (quickslot auto-aim alignment, Wand template).
+	 *
+	 * <p>The full {@code execute()→GameScene.selectCell} path is NOT exercised here:
+	 * it dereferences the static {@code cellSelector} which is null without a real
+	 * GameScene (see class docs + PLAN risk #1). The contract that the right Lua
+	 * callback fires is pinned by {@link #onUseAtCallbackFiresViaCallOpt} (cell) and
+	 * {@link #onUseCallbackFiresViaCallOpt} (self); the selectCell/cancel/enemy-reject
+	 * branching is verified by code review + desktop run.
+	 */
+	@Test
+	public void targetingHydratesSelfCellEnemy() {
+		LuaEngine.init();
+		Globals g = LuaEngine.instance().globals();
+		g.load("register_spell{ id='t_self', name='s', targeting='self' }").call();
+		g.load("register_spell{ id='t_cell', name='c', targeting='cell' }").call();
+		g.load("register_spell{ id='t_enemy', name='e', targeting='enemy' }").call();
+
+		LuaSpell self = LuaSpellRegistry.create("t_self");
+		LuaSpell cell = LuaSpellRegistry.create("t_cell");
+		LuaSpell enemy = LuaSpellRegistry.create("t_enemy");
+		assertEquals("self", self.targeting());
+		assertEquals("cell", cell.targeting());
+		assertEquals("enemy", enemy.targeting());
+
+		assertFalse("self must not enable quickslot targeting", self.usesTargeting);
+		assertTrue("cell must enable quickslot targeting", cell.usesTargeting);
+		assertTrue("enemy must enable quickslot targeting", enemy.usesTargeting);
+	}
+
+	@Test
+	public void targetingBadValueFallsBackToSelf() {
+		LuaEngine.init();
+		Globals g = LuaEngine.instance().globals();
+		// "char" was charm.lua's pre-M7c value; any unknown value must fall back.
+		g.load("register_spell{ id='t_char', name='c', targeting='char' }").call();
+		g.load("register_spell{ id='t_garbage', name='g', targeting='banana' }").call();
+
+		assertEquals("char must fall back to self",
+				"self", LuaSpellRegistry.create("t_char").targeting());
+		assertEquals("unknown value must fall back to self",
+				"self", LuaSpellRegistry.create("t_garbage").targeting());
+		assertFalse("fallback must not enable quickslot targeting",
+				LuaSpellRegistry.create("t_char").usesTargeting);
+	}
+
+	@Test
+	public void onUseAtCallbackFiresViaCallOpt() {
+		LuaEngine.init();
+		Globals g = LuaEngine.instance().globals();
+		// onUseAt(heroId, cellId) is the M7c cell/enemy callback. callOpt is
+		// varargs, so the 2-arg call works the same as execute's applyAtCell.
+		g.set("_m7c_flag", LuaValue.FALSE);
+		g.load("register_spell{ id='atcell', name='a', " +
+				"onUseAt=function(heroId, cell) _m7c_flag=true; _m7c_hero=heroId; _m7c_cell=cell end }"
+		).call();
+		LuaTable tbl = LuaSpellRegistry.getTable("atcell");
+		assertNotNull(tbl);
+
+		LuaItemCallbacks.callOpt(tbl, "onUseAt",
+				LuaValue.valueOf(77), LuaValue.valueOf(123));
+
+		assertTrue("onUseAt must run when present", g.get("_m7c_flag").toboolean());
+		assertEquals(77, g.get("_m7c_hero").toint());
+		assertEquals("cellId must reach Lua as the 2nd arg", 123, g.get("_m7c_cell").toint());
+	}
+
+	@Test
+	public void migratedSpellsHaveCorrectTargeting() {
+		LuaEngine.init();
+		assertEquals("cell", LuaSpellRegistry.create("lightning_bolt").targeting());
+		assertEquals("cell", LuaSpellRegistry.create("town_portal").targeting());
+		assertEquals("cell", LuaSpellRegistry.create("summon_beast").targeting());
+		assertEquals("cell", LuaSpellRegistry.create("raise_dead").targeting());
+		assertEquals("enemy", LuaSpellRegistry.create("charm").targeting());
+		// untouched self spells stay self + no quickslot targeting
+		assertEquals("self", LuaSpellRegistry.create("heal").targeting());
+		assertEquals("self", LuaSpellRegistry.create("haste").targeting());
+		assertEquals("self", LuaSpellRegistry.create("sprout").targeting());
+		assertFalse(LuaSpellRegistry.create("heal").usesTargeting);
 	}
 
 	// ---- M1 sandbox regression ----
