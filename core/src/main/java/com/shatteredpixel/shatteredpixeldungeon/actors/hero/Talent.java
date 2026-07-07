@@ -76,6 +76,7 @@ import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaTalentOverride;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaTalentRegistry;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.CharSprite;
 import com.shatteredpixel.shatteredpixeldungeon.ui.BuffIndicator;
@@ -201,7 +202,13 @@ public enum Talent {
 	//universal T4
 	HEROIC_ENERGY(26, 4), //See icon() and title() for special logic for this one
 	//Ratmogrify T4
-	RATSISTANCE(215, 4), RATLOMACY(216, 4), RATFORCEMENTS(217, 4);
+	RATSISTANCE(215, 4), RATLOMACY(216, 4), RATFORCEMENTS(217, 4),
+	//M8d1 (D6(b) MVP): mod-injected talent slots. Lua activates one via
+	//register_talent{id="MOD_EXAMPLE_TALENT", tier=2, class="WARRIOR", ...} — the
+	//enum slot must be pre-declared here because tier keys are Talent constants.
+	//icon 219/220 are legal unused frames in talent_icons.png (512x128 → 0..255);
+	//transparent placeholders, not rendered by MVP tests. Tier 1-2 only (MVP).
+	MOD_EXAMPLE_TALENT(219, 2), MOD_SECOND_TALENT(220, 2);
 
 	public static class ImprovisedProjectileCooldown extends FlavourBuff{
 		public int icon() { return BuffIndicator.TIME; }
@@ -485,6 +492,10 @@ public enum Talent {
 		if (this == HEROIC_ENERGY && Ratmogrify.useRatroicEnergy){
 			return Messages.get(this, name() + ".rat_title");
 		}
+		// M8d1: Lua title override (MOD_ enum slots have no .title properties key,
+		// so Messages.get would return a !!!missing!!! placeholder). override-first.
+		String overrideTitle = LuaTalentOverride.getTitle(this);
+		if (overrideTitle != null) return overrideTitle;
 		return Messages.get(this, name() + ".title");
 	}
 
@@ -1071,6 +1082,11 @@ public enum Talent {
 
 		//tier4
 		//TBD
+
+		//M8d1 (D6(b) MVP): Lua-injected mod talents fill their registered class+tier
+		//slots. Single-point hook — the vanilla switch bodies above are untouched.
+		//With every mod disabled LuaTalentRegistry is empty and this is a no-op (C3).
+		LuaTalentRegistry.injectClassTalents(cls, talents);
 	}
 
 	public static void initSubclassTalents( Hero hero ){
@@ -1219,7 +1235,16 @@ public enum Talent {
 								tier.put(talent, Math.min(points, talent.maxPoints()));
 							}
 						} catch (Exception e) {
-							ShatteredPixelDungeon.reportException(e);
+							// M8d1 (D6(b) MVP): a bundle name that isn't a Talent enum constant
+							// (a removed vanilla name, or a corrupted save). If it's a known mod
+							// talent id, treat as "mod removed since save was written" and silently
+							// skip; otherwise surface the error as before. Note: in MVP mod talents
+							// ARE enum constants, so Talent.valueOf succeeds for them and this
+							// branch is defensive — mod-removal is normally absorbed by the
+							// tier.containsKey guard above.
+							if (!LuaTalentRegistry.isKnownModTalent(tName)) {
+								ShatteredPixelDungeon.reportException(e);
+							}
 						}
 					}
 				}

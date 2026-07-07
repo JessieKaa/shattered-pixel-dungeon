@@ -56,6 +56,7 @@ final class ModTestSupport {
 		LuaShopRegistry.clear();
 		LuaBuffRegistry.clear();
 		LuaTalentOverride.clear();
+		LuaTalentRegistry.clear();
 		LuaEngine.resetForTests();
 	}
 

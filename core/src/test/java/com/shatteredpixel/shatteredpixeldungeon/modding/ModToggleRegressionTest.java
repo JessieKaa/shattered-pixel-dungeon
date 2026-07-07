@@ -133,9 +133,12 @@ public class ModToggleRegressionTest {
 		assertTrue("M6c chaos_shield_left loads", LuaBuffRegistry.contains("chaos_shield_left"));
 		assertEquals("16 M6c buff ports", 16, LuaBuffRegistry.size());
 		// M7e: 2 talent override scripts (hearty_meal lower+desc, iron_will desc-only).
-		assertEquals("2 M7e talent overrides", 2, LuaTalentOverride.size());
+		// M8d1: +1 forwarded from register_talent (mod_example.lua → MOD_EXAMPLE_TALENT),
+		// since register_talent reuses the M7e override path for desc/maxPoints/title.
+		assertEquals("2 M7e overrides + 1 M8d1 forwarded = 3", 3, LuaTalentOverride.size());
 		assertTrue("M7e hearty_meal override loads", LuaTalentOverride.get(Talent.HEARTY_MEAL) != null);
 		assertTrue("M7e iron_will override loads", LuaTalentOverride.get(Talent.IRON_WILL) != null);
+		assertTrue("M8d1 mod_example talent registered", LuaTalentRegistry.isKnownModTalent("MOD_EXAMPLE_TALENT"));
 
 		// Exact sizes: catches a missing/misnamed script that ID-checks alone could miss.
 		assertEquals("10 item dir scripts + 1 entry item", 11, LuaItemRegistry.size());

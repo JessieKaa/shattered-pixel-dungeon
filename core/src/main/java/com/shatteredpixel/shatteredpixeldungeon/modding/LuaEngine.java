@@ -109,6 +109,12 @@ public class LuaEngine implements ResourceFinder {
 			// maxPoints(lower-only)/desc into LuaTalentOverride. See LuaTalentOverride javadoc
 			// for the lower-only rationale (raising breaks the [0, vanilla] formula domain).
 			globals.set("register_talent_override", new RegisterTalentOverrideFunction());
+			// M8d1: register_talent global. Activates a pre-declared MOD_-prefixed Talent
+			// enum slot (e.g. MOD_EXAMPLE_TALENT, declared in Talent.java) into a class+tier
+			// (D6(b) MVP). id/tier(1-2)/class are validated here; desc/maxPoints/title(name)
+			// are forwarded to LuaTalentOverride so Talent.maxPoints()/desc()/title() reuse
+			// the M7e fallback. LuaTalentRegistry owns the tier injection.
+			globals.set("register_talent", new RegisterTalentFunction());
 			// M2: inject the narrow RPD.* surface (affectBuff/damageChar/GLog/...).
 			// Lua never gets a Char object — only int ids resolved via Actor.findById.
 			globals.set("RPD", RpdApi.build());
@@ -717,6 +723,95 @@ public class LuaEngine implements ResourceFinder {
 				LuaTalentOverride.register(talent, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_talent_override rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_talent(table)} global handed to Lua (M8d1, D6(b) MVP).
+	 * Activates a pre-declared {@code MOD_}-prefixed {@link Talent} enum slot
+	 * (e.g. {@code MOD_EXAMPLE_TALENT}, declared in {@code Talent.java}) and
+	 * injects it into a class's tier via {@link LuaTalentRegistry}. Unlike
+	 * {@link RegisterTalentOverrideFunction} (which retunes existing talents),
+	 * this is for NEW talents entering a class's tier list.
+	 *
+	 * <p>Validation: {@code id} must start with {@code "MOD_"} and resolve to a
+	 * declared enum constant (vanilla names are rejected — retuning vanilla is
+	 * M7e's job); {@code tier} must be an int in {@code [1,2]} (MVP; MOD_ slots
+	 * have {@code baseMaxPoints=2}, so tier 3/4 caps would be rejected by the
+	 * M7e lower-only guard — deferred to M8d2); {@code class} must be a
+	 * {@code HeroClass} name. {@code name}/{@code title}/{@code desc}/
+	 * {@code maxPoints} are forwarded to {@link LuaTalentOverride#register} so
+	 * the existing {@code Talent.title()}/{@code desc()}/{@code maxPoints()}
+	 * fallback picks them up.
+	 *
+	 * <p>Bad input logs and skips (never throws), mirroring the other
+	 * {@code register_*} globals.
+	 */
+	private static class RegisterTalentFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_talent: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				if (!id.startsWith("MOD_")) {
+					Gdx.app.error(TAG, "register_talent: id must start with \"MOD_\" (got \""
+							+ id + "\"), skipping; to retune a vanilla talent use register_talent_override");
+					return NIL;
+				}
+				com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent talent;
+				try {
+					talent = com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent.valueOf(id);
+				} catch (IllegalArgumentException e) {
+					Gdx.app.error(TAG, "register_talent: id '" + id
+							+ "' is not a declared Talent enum constant — declare a MOD_ slot in Talent.java first, skipping");
+					return NIL;
+				}
+				LuaValue tierV = tbl.get("tier");
+				if (!tierV.isint()) {
+					Gdx.app.error(TAG, "register_talent '" + id + "': tier must be an int, skipping (got "
+							+ tierV.typename() + ")");
+					return NIL;
+				}
+				int tier = tierV.toint();
+				if (tier < 1 || tier > 2) {
+					Gdx.app.error(TAG, "register_talent '" + id + "': tier must be 1-2 (MVP), got "
+							+ tier + ", skipping (tier 3/4 deferred to M8d2)");
+					return NIL;
+				}
+				String className = tbl.get("class").checkjstring();
+				com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass cls;
+				try {
+					cls = com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass.valueOf(className);
+				} catch (IllegalArgumentException e) {
+					Gdx.app.error(TAG, "register_talent '" + id + "': unknown class '"
+							+ className + "', skipping");
+					return NIL;
+				}
+				LuaValue nameV = tbl.get("name");
+				LuaValue titleV = tbl.get("title");
+				// MOD_ enum slots have no .title properties key, so a player-facing
+				// name is mandatory — without it Talent.title() would render a
+				// !!!MOD_*.title!!! placeholder. Accept either `name` or `title`
+				// (both flow into LuaTalentOverride as the title override). Require
+				// a genuine LuaString: luaj's isstring() is true for numbers, which
+				// are not a real title.
+				if (!(nameV instanceof org.luaj.vm2.LuaString) && !(titleV instanceof org.luaj.vm2.LuaString)) {
+					Gdx.app.error(TAG, "register_talent '" + id
+							+ "': missing/non-string 'name' (or 'title') — MOD_ talents have no .title properties key, skipping");
+					return NIL;
+				}
+				LuaTalentRegistry.register(talent, tier, cls);
+				// Forward desc/maxPoints/title(name) to the M7e override path so
+				// Talent.maxPoints()/desc()/title() reuse the existing fallback.
+				LuaTalentOverride.register(talent, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_talent rejected a malformed definition", e);
 			}
 			return NIL;
 		}

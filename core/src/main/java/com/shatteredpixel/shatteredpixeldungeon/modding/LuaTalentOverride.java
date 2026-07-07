@@ -56,10 +56,12 @@ public final class LuaTalentOverride {
 	static final class Override {
 		final Integer maxPoints;
 		final String desc;
+		final String title;
 
-		Override(Integer maxPoints, String desc) {
+		Override(Integer maxPoints, String desc, String title) {
 			this.maxPoints = maxPoints;
 			this.desc = desc;
+			this.title = title;
 		}
 	}
 
@@ -85,6 +87,18 @@ public final class LuaTalentOverride {
 	}
 
 	/**
+	 * Override title for {@code talent}, or {@code null} → caller uses vanilla
+	 * {@code Messages.get}. M8d1 addition: a {@code MOD_}-prefixed enum has no
+	 * {@code .title} properties key, so {@link Talent#title()} reads this first.
+	 * M7e {@code register_talent_override} never sets title (no {@code name}
+	 * field), so M7e talents keep the vanilla Messages title.
+	 */
+	public static String getTitle(Talent talent) {
+		Override o = overrides.get(talent);
+		return o == null ? null : o.title;
+	}
+
+	/**
 	 * Capture a {@code register_talent_override{...}} table for {@code talent}.
 	 * Field validation is independent per field:
 	 * <ul>
@@ -99,12 +113,18 @@ public final class LuaTalentOverride {
 	static void register(Talent talent, LuaTable tbl) {
 		Integer maxPoints = parseMaxPoints(talent, tbl.get("maxPoints"));
 		String desc = parseDesc(tbl.get("desc"));
-		if (maxPoints == null && desc == null) {
+		// M8d1: title override. Reads "title" then "name" (RegisterTalentFunction
+		// forwards the modder-facing `name` field this way for MOD_ enum slots,
+		// which have no .title properties key). M7e register_talent_override
+		// never sends either, so M7e talents keep the vanilla Messages title.
+		String title = parseTitle(tbl.get("title"));
+		if (title == null) title = parseTitle(tbl.get("name"));
+		if (maxPoints == null && desc == null && title == null) {
 			Gdx.app.error(TAG, "register_talent_override '" + talent.name()
-					+ "': no valid maxPoints/desc fields, skipping");
+					+ "': no valid maxPoints/desc/title fields, skipping");
 			return;
 		}
-		overrides.put(talent, new Override(maxPoints, desc));
+		overrides.put(talent, new Override(maxPoints, desc, title));
 	}
 
 	private static Integer parseMaxPoints(Talent talent, LuaValue v) {
@@ -136,6 +156,16 @@ public final class LuaTalentOverride {
 		// skip it so a typo like desc=123 is noisy rather than silently "123".
 		if (!(v instanceof org.luaj.vm2.LuaString)) {
 			Gdx.app.error(TAG, "register_talent_override: desc must be a string, skipping field (got "
+					+ v.typename() + ")");
+			return null;
+		}
+		return v.tojstring();
+	}
+
+	private static String parseTitle(LuaValue v) {
+		if (v.isnil()) return null;
+		if (!(v instanceof org.luaj.vm2.LuaString)) {
+			Gdx.app.error(TAG, "register_talent_override: title must be a string, skipping field (got "
 					+ v.typename() + ")");
 			return null;
 		}
