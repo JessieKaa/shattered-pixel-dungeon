@@ -11,6 +11,9 @@ import org.luaj.vm2.lib.ResourceFinder;
 
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * Minimal luaj engine for the Lua modding pipeline.
@@ -42,6 +45,15 @@ public class LuaEngine implements ResourceFinder {
 	private Globals globals;
 	private boolean initialized = false;
 
+	/**
+	 * Snapshot of the mod ids whose scripts were actually loaded into the Lua registries at
+	 * {@link #initInternal()} time. Captured once, never mutated in production. Save-slot code
+	 * uses this (rather than re-reading {@link ModRegistry#isEnabled}) so a pending toggle that
+	 * hasn't been applied via restart cannot corrupt a save snapshot or trigger a false-positive
+	 * "missing mod" warning — this set reflects what the running process actually has loaded.
+	 */
+	private static Set<String> activeEnabledModIds = Collections.emptySet();
+
 	private LuaEngine() { }
 
 	public static synchronized LuaEngine instance() {
@@ -63,10 +75,25 @@ public class LuaEngine implements ResourceFinder {
 	 */
 	static synchronized void resetForTests() {
 		instance = null;
+		activeEnabledModIds = Collections.emptySet();
+	}
+
+	/** Mods whose Lua content is loaded in this process right now (init-time snapshot). */
+	public static Set<String> activeEnabledModIds() {
+		return activeEnabledModIds;
 	}
 
 	private synchronized void initInternal() {
 		if (initialized) return;
+		// Capture the enabled set BEFORE the loader loops run: this is exactly the set of mods that
+		// will contribute scripts to the registries this run. Snapshot into an immutable view so the
+		// save-slot feature can compare save-time vs current-load without being skewed by a pending
+		// enable/disable toggle that won't take effect until restart.
+		LinkedHashSet<String> active = new LinkedHashSet<>();
+		for (ModManifest mod : ModRegistry.all()) {
+			if (ModRegistry.isEnabled(mod.id)) active.add(mod.id);
+		}
+		activeEnabledModIds = Collections.unmodifiableSet(active);
 		try {
 			globals = LuaSandbox.exposedGlobals();
 			globals.finder = this;

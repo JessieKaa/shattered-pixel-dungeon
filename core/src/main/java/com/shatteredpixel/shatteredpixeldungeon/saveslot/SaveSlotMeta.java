@@ -25,6 +25,9 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
 import com.shatteredpixel.shatteredpixeldungeon.ui.Icons;
 import com.watabou.noosa.Image;
 
+import java.util.Collections;
+import java.util.Set;
+
 public class SaveSlotMeta {
 	public String name;
 	public int version;
@@ -32,6 +35,13 @@ public class SaveSlotMeta {
 	public int level;
 	public HeroClass heroClass;
 	public long savedAt;
+	/**
+	 * Mods that were active (loaded into the Lua registry) at save time. Compared against the
+	 * current process's active set on load to flag stale references (disabled/removed/unscanned
+	 * mods whose Lua content will degrade — items render as ???, buffs self-detach). Defaults to
+	 * an empty set so legacy slots created before this field existed load without warning.
+	 */
+	public Set<String> enabledMods = Collections.emptySet();
 
 	public Image icon() {
 		if (heroClass == null) return Icons.get(Icons.INFO);

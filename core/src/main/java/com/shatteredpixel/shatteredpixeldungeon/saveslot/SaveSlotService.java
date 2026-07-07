@@ -25,10 +25,12 @@ import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.GamesInProgress;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaEngine;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
 import com.shatteredpixel.shatteredpixeldungeon.ui.Icons;
 import com.shatteredpixel.shatteredpixeldungeon.ui.RedButton;
+import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndGame;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndResurrect;
 import com.watabou.noosa.Game;
@@ -41,8 +43,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -61,6 +67,8 @@ public class SaveSlotService {
 
 	private static final String SLOT_ROOT = "save_slots/";
 	private static final String META_FILE = "meta.bundle";
+	/** Bundle key for the active-mod snapshot stored in {@link #META_FILE}. Package-private for test access. */
+	static final String KEY_ENABLED_MODS = "enabled_mods";
 
 	private static final Pattern NAME_PATTERN = Pattern.compile("[A-Za-z0-9_\\-]{1,20}");
 
@@ -126,6 +134,9 @@ public class SaveSlotService {
 			meta.put("level", Dungeon.hero.lvl);
 			meta.put("hero_class", Dungeon.hero.heroClass);
 			meta.put("saved_at", System.currentTimeMillis());
+			// Snapshot the mods actually loaded into the Lua registries this run (init-time set, not
+			// the pending prefs state). On load, a slot saved under a different active set is flagged.
+			meta.put(KEY_ENABLED_MODS, LuaEngine.activeEnabledModIds().toArray(new String[0]));
 			FileUtils.bundleToFile(dst + "/" + META_FILE, meta);
 		}
 	}
@@ -157,6 +168,11 @@ public class SaveSlotService {
 			// 清除可能存在的 WndResurrect 占位符(死亡读档场景)
 			// 否则后续死亡永远不进 Rankings
 			WndResurrect.instance = null;
+
+			// 暂存 mod 失配警告:不在此 GLog.w,因为 InterlevelScene.restore() 会 GameLog.wipe()
+			// 清掉。GameScene.create 重建 GameLog 后由 onGameSceneReady() 消费并真正发出。
+			// 始终(重新)赋值:clean load 必须清掉上一轮残留的 stale warning。
+			stageLoadWarning(missingMods(meta));
 
 			InterlevelScene.mode = InterlevelScene.Mode.CONTINUE;
 			Game.switchScene(InterlevelScene.class);
@@ -297,6 +313,15 @@ public class SaveSlotService {
 			} catch (IllegalArgumentException e) {
 				m.heroClass = HeroClass.WARRIOR;
 			}
+			// contains() guard first: getStringArray on a missing key throws JSONException
+			// internally (logged via Game.reportException). Legacy slots pre-M9a have no such
+			// key → treat as empty (no warning), don't spam the error log.
+			if (b.contains(KEY_ENABLED_MODS)) {
+				String[] ids = b.getStringArray(KEY_ENABLED_MODS);
+				if (ids != null) {
+					m.enabledMods = new LinkedHashSet<>(Arrays.asList(ids));
+				}
+			}
 			return m;
 		} catch (IOException e) {
 			return null;
@@ -305,6 +330,68 @@ public class SaveSlotService {
 
 	private static String slotDir(String name) {
 		return SLOT_ROOT + name;
+	}
+
+	// ---- mod mismatch detection ---------------------------------------------
+
+	private static final String WARN_ZH =
+			"存档引用了当前未启用的 mod: %s,部分功能可能失效";
+	private static final String WARN_EN =
+			"Save references mods not currently enabled: %s. Some content may not work.";
+
+	/**
+	 * Warning text staged during {@link #loadFromSlot} when a slot's saved active-mod set isn't
+	 * fully covered by the running process's active set. Emitted via {@link #onGameSceneReady()}
+	 * rather than at load time because {@link InterlevelScene}'s CONTINUE path calls
+	 * {@code GameLog.wipe()}, which would discard any GLog entry posted before the scene switch.
+	 * Package-private for test access.
+	 */
+	static String pendingLoadWarning;
+
+	/**
+	 * Single-point hook invoked from {@link GameScene#create} right after its {@code GameLog} is
+	 * rebuilt. Flushes any pending mod-mismatch warning so the player actually sees it.
+	 */
+	public static void onGameSceneReady() {
+		String w = pendingLoadWarning;
+		pendingLoadWarning = null;
+		if (w != null && !w.isEmpty()) {
+			GLog.w(w);
+		}
+	}
+
+	/**
+	 * Stage (or clear) the pending load warning from a computed missing set. Always assigns so a
+	 * clean load following a stale one doesn't leak the previous warning. Package-private for test.
+	 */
+	static void stageLoadWarning(Set<String> missing) {
+		pendingLoadWarning = (missing == null || missing.isEmpty()) ? null : formatWarning(missing);
+	}
+
+	/**
+	 * Mods present in the slot's snapshot but not in the running process's active set: their Lua
+	 * content (items/buffs/…) will degrade (??? items, self-detaching buffs). Empty for legacy
+	 * slots saved before the snapshot existed, and when nothing is missing.
+	 */
+	public static Set<String> missingMods(SaveSlotMeta meta) {
+		if (meta == null) return Collections.emptySet();
+		return computeMissingMods(meta.enabledMods, LuaEngine.activeEnabledModIds());
+	}
+
+	/**
+	 * Pure diff of snapshot vs current enabled set. Package-private for unit testing without
+	 * touching {@link LuaEngine}. Returns a stable-order {@link LinkedHashSet}.
+	 */
+	static Set<String> computeMissingMods(Set<String> snapshot, Set<String> currentlyEnabled) {
+		if (snapshot == null || snapshot.isEmpty()) return new LinkedHashSet<>();
+		LinkedHashSet<String> missing = new LinkedHashSet<>(snapshot);
+		missing.removeAll(currentlyEnabled != null ? currentlyEnabled : Collections.emptySet());
+		return missing;
+	}
+
+	private static String formatWarning(Set<String> missing) {
+		String tmpl = LANG_ZH ? WARN_ZH : WARN_EN;
+		return String.format(tmpl, String.join(", ", missing));
 	}
 
 	// ---- death-reload hook ----------------------------------------------------
