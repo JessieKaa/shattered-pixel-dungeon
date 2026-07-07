@@ -75,6 +75,7 @@ import com.shatteredpixel.shatteredpixeldungeon.items.weapon.missiles.MissileWea
 import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaTalentOverride;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.CharSprite;
 import com.shatteredpixel.shatteredpixeldungeon.ui.BuffIndicator;
@@ -470,6 +471,13 @@ public enum Talent {
 	}
 
 	public int maxPoints(){
+		// M7e: Lua override (lower-only); falls back to the enum field when absent.
+		Integer mp = LuaTalentOverride.getMaxPoints(this);
+		return mp != null ? mp : maxPoints;
+	}
+
+	/** Vanilla enum cap, ignoring any Lua override. Used by LuaTalentOverride to reject raises. */
+	public int baseMaxPoints(){
 		return maxPoints;
 	}
 
@@ -485,6 +493,9 @@ public enum Talent {
 	}
 
 	public String desc(boolean metamorphed){
+		// M7e: Lua override (whole-string replacement, override-first).
+		String overrideDesc = LuaTalentOverride.getDesc(this);
+		if (overrideDesc != null) return overrideDesc;
 		if (metamorphed){
 			String metaDesc = Messages.get(this, name() + ".meta_desc");
 			if (!metaDesc.equals(Messages.NO_TEXT_FOUND)){

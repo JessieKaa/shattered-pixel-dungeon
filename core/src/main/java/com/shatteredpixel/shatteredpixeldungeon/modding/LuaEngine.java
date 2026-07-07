@@ -104,6 +104,11 @@ public class LuaEngine implements ResourceFinder {
 			// detach/immunities/onRestore after a save/load cycle (the table is the single
 			// source of truth, same pattern as LuaSpell/LuaItem).
 			globals.set("register_buff", new RegisterBuffFunction());
+			// M7e: register_talent_override global. Mirrors register_buff but targets a
+			// Talent enum constant (id-resolved via Talent.valueOf) and captures only
+			// maxPoints(lower-only)/desc into LuaTalentOverride. See LuaTalentOverride javadoc
+			// for the lower-only rationale (raising breaks the [0, vanilla] formula domain).
+			globals.set("register_talent_override", new RegisterTalentOverrideFunction());
 			// M2: inject the narrow RPD.* surface (affectBuff/damageChar/GLog/...).
 			// Lua never gets a Char object — only int ids resolved via Actor.findById.
 			globals.set("RPD", RpdApi.build());
@@ -126,6 +131,7 @@ public class LuaEngine implements ResourceFinder {
 			loadNpcScripts();
 			loadShopScripts();
 			loadBuffScripts();
+			loadTalentScripts();
 
 			// M5b: load each enabled mod's entry script (Remixed-style init.lua that calls
 			// register_*). ModRegistry.all() lazy-scans on first use (production: triggers scan here;
@@ -250,6 +256,20 @@ public class LuaEngine implements ResourceFinder {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
 			loadScriptsFrom("mods/" + mod.id + "/scripts/buffs", "Lua buffs (" + mod.id + ")", LuaBuffRegistry::size);
+		}
+	}
+
+	/**
+	 * M7e: enumerate {@code mods/<id>/scripts/talents/*.lua} for each enabled mod and
+	 * compile each. Same enabled-mod iteration + two-stage listing as the other loaders
+	 * (M5c). Talent overrides are id-resolved against the {@link com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent}
+	 * enum and stored in {@link LuaTalentOverride}; a disabled mod contributes zero
+	 * overrides (C3 regression baseline — vanilla playthrough loads no talent overrides).
+	 */
+	private void loadTalentScripts() {
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/talents", "Lua talent overrides (" + mod.id + ")", LuaTalentOverride::size);
 		}
 	}
 
@@ -393,6 +413,7 @@ public class LuaEngine implements ResourceFinder {
 		g.set("register_shop", new RegisterShopFunction());
 		g.set("register_level", new RegisterLevelFunction());
 		g.set("register_buff", new RegisterBuffFunction());
+		g.set("register_talent_override", new RegisterTalentOverrideFunction());
 		g.set("RPD", RpdApi.build());
 	}
 
@@ -666,6 +687,36 @@ public class LuaEngine implements ResourceFinder {
 				LuaBuffRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_buff rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_talent_override(table)} global handed to Lua (M7e). Lighter
+	 * than the other register_* globals: the table carries an {@code id} (resolved to a
+	 * {@link com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent} enum constant
+	 * via {@code Talent.valueOf}) plus optional {@code maxPoints}/{@code desc}. A
+	 * bad/unknown id logs and skips (never throws). Field-level validation (lower-only
+	 * maxPoints, string desc, bad-value skip) is delegated to
+	 * {@link LuaTalentOverride#register}; the entry is stored only if at least one
+	 * field is valid.
+	 */
+	private static class RegisterTalentOverrideFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_talent_override: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent talent =
+						com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent.valueOf(id);
+				LuaTalentOverride.register(talent, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_talent_override rejected a malformed definition", e);
 			}
 			return NIL;
 		}
