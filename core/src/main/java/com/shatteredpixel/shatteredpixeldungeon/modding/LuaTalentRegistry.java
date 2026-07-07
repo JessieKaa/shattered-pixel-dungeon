@@ -1,8 +1,10 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import com.badlogic.gdx.Gdx;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent;
+import org.luaj.vm2.LuaValue;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -53,11 +55,17 @@ public final class LuaTalentRegistry {
 		final Talent talent;
 		final int tier;        // 1-2 (MVP)
 		final HeroClass heroClass;
+		// M8d2: Lua on_upgrade callback, or null when the talent registered
+		// without one. Java null (not LuaValue.NIL) so the dispatch guard is a
+		// plain == null check — NIL is a singleton object and would otherwise
+		// sail past the guard and throw on .call() every upgrade.
+		final LuaValue onUpgrade;
 
-		ModTalentDef(Talent talent, int tier, HeroClass heroClass) {
+		ModTalentDef(Talent talent, int tier, HeroClass heroClass, LuaValue onUpgrade) {
 			this.talent = talent;
 			this.tier = tier;
 			this.heroClass = heroClass;
+			this.onUpgrade = onUpgrade;
 		}
 	}
 
@@ -72,8 +80,14 @@ public final class LuaTalentRegistry {
 	 * throwing — mirrors {@link LuaTalentOverride#register}'s no-throw contract.
 	 *
 	 * <p>{@code tier ∈ [1,2]} is the MVP domain (see class javadoc).
+	 *
+	 * @param onUpgrade the {@code on_upgrade} Lua function to fire when this
+	 *                  talent is upgraded, or {@code null} if the registration
+	 *                  omitted one (non-function values are normalized to null
+	 *                  by the caller). Stored as Java null so the dispatch guard
+	 *                  is a plain {@code == null} check.
 	 */
-	static void register(Talent talent, int tier, HeroClass heroClass) {
+	static void register(Talent talent, int tier, HeroClass heroClass, LuaValue onUpgrade) {
 		if (talent == null || heroClass == null) {
 			Gdx.app.error(TAG, "register: null talent/class, skipping");
 			return;
@@ -83,8 +97,35 @@ public final class LuaTalentRegistry {
 					+ tier + ", skipping");
 			return;
 		}
-		byTalent.put(talent, new ModTalentDef(talent, tier, heroClass));
+		byTalent.put(talent, new ModTalentDef(talent, tier, heroClass, onUpgrade));
 		knownNames.add(talent.name());
+	}
+
+	/**
+	 * Fire the registered {@code on_upgrade} Lua callback for {@code talent}, if
+	 * any. Called from the single-point hook at the tail of
+	 * {@link Talent#onTalentUpgraded} (M8d2), so it runs on EVERY upgrade of
+	 * EVERY talent — the guards therefore must be cheap:
+	 * <ul>
+	 *   <li>vanilla talents are not in {@code byTalent} → one HashMap miss returns.</li>
+	 *   <li>a mod talent without {@code on_upgrade} → {@code def.onUpgrade == null} returns.</li>
+	 *   <li>only a mod talent that registered an {@code on_upgrade} function enters Lua.</li>
+	 * </ul>
+	 *
+	 * <p>The callback receives {@code (heroId:int, points:int)} — id-only across
+	 * the sandbox, no Java handle (D5'-(a)). {@code points} is the post-upgrade
+	 * count ({@link Hero#upgradeTalent} increments before invoking
+	 * {@code onTalentUpgraded}). Any Lua-side exception is logged and swallowed
+	 * so a buggy mod script never blocks a talent upgrade.
+	 */
+	public static void dispatchTalentUpgraded(Hero hero, Talent talent, int points) {
+		if (hero == null || talent == null) return;
+		ModTalentDef def = byTalent.get(talent);
+		if (def == null || def.onUpgrade == null) return;		try {
+			def.onUpgrade.call(LuaValue.valueOf(hero.id()), LuaValue.valueOf(points));
+		} catch (Exception e) {
+			Gdx.app.error(TAG, "on_upgrade threw for talent " + talent.name(), e);
+		}
 	}
 
 	/**

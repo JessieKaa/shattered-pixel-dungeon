@@ -598,6 +598,14 @@ public enum Talent {
 		if (talent == SPIRIT_FORM){
 			Dungeon.hero.updateHT(false);
 		}
+
+		// M8d2: Lua on_upgrade callback (id-only across sandbox). Single-point
+		// hook at the tail of onTalentUpgraded — vanilla talents take one
+		// HashMap miss in LuaTalentRegistry and never enter Lua; only a mod
+		// talent that registered an on_upgrade function fires. points is the
+		// post-upgrade count (Hero.upgradeTalent increments before calling).
+		com.shatteredpixel.shatteredpixeldungeon.modding.LuaTalentRegistry
+				.dispatchTalentUpgraded(hero, talent, hero.pointsInTalent(talent));
 	}
 
 	public static class CachedRationsDropped extends CounterBuff{{revivePersists = true;}};

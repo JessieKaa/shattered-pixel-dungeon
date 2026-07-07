@@ -806,7 +806,14 @@ public class LuaEngine implements ResourceFinder {
 							+ "': missing/non-string 'name' (or 'title') — MOD_ talents have no .title properties key, skipping");
 					return NIL;
 				}
-				LuaTalentRegistry.register(talent, tier, cls);
+				// M8d2: on_upgrade callback (optional). Non-function values
+				// (including missing) normalize to Java null so the dispatch
+				// guard stays a plain == null check (LuaValue.NIL is a singleton
+				// object and would otherwise bypass it). Forwarded to the
+				// registry, fired by Talent.onTalentUpgraded on upgrade.
+				LuaValue onUpgradeRaw = tbl.get("on_upgrade");
+				LuaValue onUpgrade = onUpgradeRaw.isfunction() ? onUpgradeRaw : null;
+				LuaTalentRegistry.register(talent, tier, cls, onUpgrade);
 				// Forward desc/maxPoints/title(name) to the M7e override path so
 				// Talent.maxPoints()/desc()/title() reuse the existing fallback.
 				LuaTalentOverride.register(talent, tbl);

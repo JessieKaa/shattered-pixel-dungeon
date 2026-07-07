@@ -3,9 +3,14 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.backends.headless.HeadlessApplication;
 import com.badlogic.gdx.backends.headless.HeadlessApplicationConfiguration;
+import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Belongings;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent;
+import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.watabou.noosa.Game;
 import com.watabou.utils.Bundle;
 import org.junit.AfterClass;
@@ -13,6 +18,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.luaj.vm2.Globals;
+import org.luaj.vm2.LuaValue;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -48,6 +54,7 @@ public class LuaTalentRegistryTest {
 
 	private static HeadlessApplication application;
 	private static int savedVersionCode;
+	private static String savedVersion;
 
 	@BeforeClass
 	public static void initHeadless() {
@@ -55,12 +62,18 @@ public class LuaTalentRegistryTest {
 		config.updatesPerSecond = 1;
 		application = new HeadlessApplication(new ApplicationAdapter() {}, config);
 		savedVersionCode = Game.versionCode;
+		savedVersion = Game.version;
 		Game.versionCode = 896;
+		// Game.version must be non-null: the on_upgrade giveItem path hits
+		// Item.collect → Catalog → Document.<clinit> → DeviceCompat.isDebug(),
+		// which does Game.version.contains(...). Mirrors RpdApiItemSpellTest.
+		Game.version = "test";
 	}
 
 	@AfterClass
 	public static void shutdown() {
 		Game.versionCode = savedVersionCode;
+		Game.version = savedVersion;
 		try { if (application != null) application.exit(); } catch (Throwable ignored) { }
 	}
 
@@ -323,5 +336,153 @@ public class LuaTalentRegistryTest {
 				talents.get(1).containsKey(Talent.MOD_EXAMPLE_TALENT));
 		// Vanilla WARRIOR tier-2 talents are untouched.
 		assertTrue(talents.get(1).containsKey(Talent.IRON_STOMACH));
+	}
+
+	// ---- M8d2: on_upgrade callback dispatch ----
+
+	/**
+	 * Build a live Hero (registered with Actor so hero.id() resolves through
+	 * {@link Actor#findById}, which is what {@code RPD.giveItem}/
+	 * {@code RPD.affectBuff} use) and park it on {@link Dungeon#hero} for the
+	 * duration of the test. Mirrors {@code RpdApiItemSpellTest.newHero}.
+	 */
+	private static Hero newHero() {
+		Hero hero = new Hero();
+		hero.HT = 30;
+		hero.HP = 30;
+		hero.belongings = new Belongings(hero);
+		Actor.add(hero);
+		return hero;
+	}
+
+	@Test
+	public void onUpgrade_firesOnTalentUpgradedWithPoints() {
+		Globals g = cleanGlobals();
+		// Callback records the int args it was called with via globals.
+		register(g, "{ id='MOD_EXAMPLE_TALENT', tier=2, class='WARRIOR', name='u', maxPoints=2, "
+				+ "on_upgrade = function(hero, points) _G.cb_called = true; _G.cb_hero = hero; _G.cb_points = points end }");
+
+		Hero hero = newHero();
+		hero.heroClass = HeroClass.WARRIOR;
+		Dungeon.hero = hero;
+		try {
+			Talent.initClassTalents(HeroClass.WARRIOR, hero.talents);
+			// upgradeTalent: +1 point THEN onTalentUpgraded → Lua dispatch.
+			hero.upgradeTalent(Talent.MOD_EXAMPLE_TALENT);
+
+			assertTrue("on_upgrade must fire on upgrade", g.get("cb_called").toboolean());
+			assertEquals("heroId (int) is forwarded, not a Java handle",
+					hero.id(), g.get("cb_hero").toint());
+			assertEquals("points is the post-upgrade count", 1, g.get("cb_points").toint());
+		} finally {
+			Dungeon.hero = null;
+			Actor.remove(hero);
+		}
+	}
+
+	@Test
+	public void onUpgrade_giveItem_collectsIntoBackpack() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_EXAMPLE_TALENT', tier=2, class='WARRIOR', name='u', maxPoints=2, "
+				+ "on_upgrade = function(hero, points) RPD.giveItem(hero, 'rotten_organ', points) end }");
+
+		Hero hero = newHero();
+		hero.heroClass = HeroClass.WARRIOR;
+		Dungeon.hero = hero;
+		try {
+			Talent.initClassTalents(HeroClass.WARRIOR, hero.talents);
+			assertTrue("backpack empty before upgrade", hero.belongings.backpack.items.isEmpty());
+
+			hero.upgradeTalent(Talent.MOD_EXAMPLE_TALENT);
+
+			// The M6d giveItem path created + collected a LuaMaterial; find it
+			// by type (id-resolved, no Java handle crossed back to Lua).
+			LuaMaterial found = null;
+			for (Item it : hero.belongings.backpack.items) {
+				if (it instanceof LuaMaterial) { found = (LuaMaterial) it; break; }
+			}
+			assertNotNull("on_upgrade's giveItem must put rotten_organ in the backpack", found);
+			assertEquals("quantity matches the points arg", 1, found.quantity());
+		} finally {
+			Dungeon.hero = null;
+			Actor.remove(hero);
+		}
+	}
+
+	@Test
+	public void onUpgrade_affectBuff_attachesLuaBuff() {
+		Globals g = cleanGlobals();
+		// test_buff is a shipped Lua buff (scripts/buffs/test_buff.lua). affectBuff
+		// is the M6c id-resolved path the PLAN calls "addBuff".
+		register(g, "{ id='MOD_EXAMPLE_TALENT', tier=2, class='WARRIOR', name='u', maxPoints=2, "
+				+ "on_upgrade = function(hero, points) RPD.affectBuff(hero, 'test_buff', points) end }");
+
+		Hero hero = newHero();
+		hero.heroClass = HeroClass.WARRIOR;
+		Dungeon.hero = hero;
+		try {
+			Talent.initClassTalents(HeroClass.WARRIOR, hero.talents);
+
+			hero.upgradeTalent(Talent.MOD_EXAMPLE_TALENT);
+
+			// Assert the SPECIFIC buff id attached (not just any LuaBuff).
+			boolean found = false;
+			for (Buff b : hero.buffs(LuaBuff.class)) {
+				if (((LuaBuff) b).sameLuaId("test_buff")) { found = true; break; }
+			}
+			assertTrue("on_upgrade's affectBuff must attach the test_buff LuaBuff", found);
+		} finally {
+			Dungeon.hero = null;
+			Actor.remove(hero);
+		}
+	}
+
+	@Test
+	public void modTalentWithoutOnUpgrade_dispatchIsNoop() {
+		Globals g = cleanGlobals();
+		g.load("_G.cb_called = false").call();
+		register(g, "{ id='MOD_EXAMPLE_TALENT', tier=2, class='WARRIOR', name='u', maxPoints=2 }");
+
+		Hero hero = newHero();
+		hero.heroClass = HeroClass.WARRIOR;
+		Dungeon.hero = hero;
+		try {
+			Talent.initClassTalents(HeroClass.WARRIOR, hero.talents);
+			// No on_upgrade registered → dispatch must bail at def.onUpgrade==null
+			// without touching Lua, so the canary stays false and no exception.
+			hero.upgradeTalent(Talent.MOD_EXAMPLE_TALENT);
+
+			assertFalse("callback must not fire without on_upgrade",
+					g.get("cb_called").toboolean());
+			assertEquals("point still incremented (upgrade not blocked)",
+					Integer.valueOf(1), hero.talents.get(1).get(Talent.MOD_EXAMPLE_TALENT));
+		} finally {
+			Dungeon.hero = null;
+			Actor.remove(hero);
+		}
+	}
+
+	@Test
+	public void vanillaTalent_dispatchIsNoop() {
+		Globals g = cleanGlobals();
+		g.load("_G.cb_called = false").call();
+		// Register an on_upgrade on the MOD_ slot only — IRON_STOMACH is vanilla
+		// and must never hit Lua even though the registry is non-empty.
+		register(g, "{ id='MOD_EXAMPLE_TALENT', tier=2, class='WARRIOR', name='u', maxPoints=2, "
+				+ "on_upgrade = function(hero, points) _G.cb_called = true end }");
+
+		Hero hero = newHero();
+		hero.heroClass = HeroClass.WARRIOR;
+		Dungeon.hero = hero;
+		try {
+			Talent.initClassTalents(HeroClass.WARRIOR, hero.talents);
+			hero.upgradeTalent(Talent.IRON_STOMACH);
+
+			assertFalse("vanilla talent upgrade must not fire any Lua callback",
+					g.get("cb_called").toboolean());
+		} finally {
+			Dungeon.hero = null;
+			Actor.remove(hero);
+		}
 	}
 }

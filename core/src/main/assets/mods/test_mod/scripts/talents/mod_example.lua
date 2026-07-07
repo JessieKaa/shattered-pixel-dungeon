@@ -17,4 +17,10 @@ register_talent {
     name = "Lua 新天赋（示例）",
     maxPoints = 2,
     desc = "Lua 新天赋示例（D6(b) MVP）：证明 register_talent 能把一个预声明的 MOD_ enum 槽位注入到指定职业的 tier 列表，玩家可用天赋点升级。",
+    -- M8d2 (D6(b) 核心价值): on_upgrade 在天赋升级时由 Java 触发。
+    -- 回调签名 (hero, points): hero 是 int heroId（sandbox 不传 Java 句柄），
+    -- points 是升级后的总点数。这里直接复用 M6d 的 RPD.giveItem 送物品。
+    on_upgrade = function(hero, points)
+        RPD.giveItem(hero, "rotten_organ", points)
+    end,
 }
