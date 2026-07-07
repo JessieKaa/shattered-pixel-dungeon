@@ -140,6 +140,11 @@ public class LuaBuff extends Buff {
             // effects so one-time attach behaviours do not replay on load.
             boolean attached = super.attachTo(target);
             restoring = false;
+            // M8b: the shield pool is not persisted (ShieldTracker is ephemeral),
+            // so re-seed the declarative shieldAmount baseline on restore —
+            // otherwise a loaded shield buff would read as 0 until its own
+            // act/defenseProc re-fed it. Mid-combat depletion is lost by design.
+            if (attached) seedShield(target);
             return attached;
         }
         if (!super.attachTo(target)) return false;
@@ -160,6 +165,10 @@ public class LuaBuff extends Buff {
                 }
             }
         }
+        // M8b: seed the shared shield pool from the declarative shieldAmount.
+        // Fires only on a fresh attach (affectLuaBuff re-affect goes through
+        // refresh(), not attachTo), so stacking does not double-seed.
+        seedShield(target);
         return true;
     }
 
@@ -399,9 +408,43 @@ public class LuaBuff extends Buff {
 
     @Override
     public String iconTextDisplay() {
+        // M8b: a shield buff shows the bearer's current shared shield pool
+        // (ShieldTracker) rather than its own level/cooldown, so the number
+        // ticks down live as hits are absorbed.
+        if (shieldAmount() > 0 && target != null) {
+            int sh = ShieldTracker.getShield(target);
+            if (sh > 0) return Integer.toString(sh);
+        }
         if (level != 0) return Integer.toString(level);
         if (!permanent && cooldown() > 0) return Integer.toString((int) visualcooldown());
         return "";
+    }
+
+    // ---- M8b shield metadata ----
+    //
+    // Declarative shield fields on the Lua table: {@code shieldAmount} (int, the
+    // points this buff contributes to the shared pool) and {@code shieldType}
+    // (string, reserved for future damage-type filtering — metadata only). Both
+    // accept a literal or a {@code function(state)} form, reusing the existing
+    // readIntField/readStringField machinery. Seeding the pool happens in
+    // {@link #attachTo} (both fresh + restore paths) so a Lua shield buff only
+    // has to declare the field and drain via {@code RPD.absorbShield} — the same
+    // declarative-then-Java-acts split used by {@link #immunities()}.
+
+    /** Points this buff seeds into {@link ShieldTracker} on attach (0 = not a shield buff). */
+    int shieldAmount() {
+        return readIntField("shieldAmount", 0);
+    }
+
+    /** Optional shield category string (metadata only; not yet read by any logic). */
+    String shieldType() {
+        return readStringField("shieldType", "");
+    }
+
+    /** Add {@link #shieldAmount()} to the bearer's pool; no-op for non-shield buffs. */
+    private void seedShield(Char target) {
+        int amt = shieldAmount();
+        if (amt > 0 && target != null) ShieldTracker.addShield(target, amt);
     }
 
     /**

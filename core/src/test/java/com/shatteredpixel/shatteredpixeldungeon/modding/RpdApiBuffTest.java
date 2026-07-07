@@ -73,6 +73,7 @@ public class RpdApiBuffTest {
     public void resetState() throws Exception {
         ModTestSupport.enableTestMod();
         ModTestSupport.resetLuaState();
+        ShieldTracker.clearAll();
         Dungeon.level = null;
         Dungeon.hero = null;
     }
@@ -926,6 +927,245 @@ public class RpdApiBuffTest {
         } finally {
             Actor.remove(h);
         }
+    }
+
+    // ---- M8b shield API (ShieldTracker pool) ----
+
+    @Test
+    public void rpdAddCharShieldAbsorbShieldRoundTrip() throws Exception {
+        Hero h = freshHero();
+        try {
+            Globals g = globals();
+            g.load("RPD.addShield(" + h.id() + ", 10)").call();
+            assertEquals("charShield reads pooled points", 10,
+                    g.load("return RPD.charShield(" + h.id() + ")").call().toint());
+            int left = g.load("return RPD.absorbShield(" + h.id() + ", 14)").call().toint();
+            assertEquals("absorb returns leftover after pool drained", 4, left);
+            assertEquals("pool drained to 0", 0,
+                    g.load("return RPD.charShield(" + h.id() + ")").call().toint());
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void rpdShieldApiRejectsBadInput() throws Exception {
+        Hero h = freshHero();
+        try {
+            Globals g = globals();
+            // bogus char id → NIL on all three
+            assertTrue("addShield bad id → nil", g.load("return RPD.addShield(999999, 5)").call().isnil());
+            assertTrue("charShield bad id → nil", g.load("return RPD.charShield(999999)").call().isnil());
+            assertTrue("absorbShield bad id → nil", g.load("return RPD.absorbShield(999999, 5)").call().isnil());
+            // bad amount on a live char → NIL (no partial application)
+            assertTrue("addShield non-number → nil", g.load("return RPD.addShield(" + h.id() + ", 'x')").call().isnil());
+            assertEquals("nothing pooled from rejected add", 0,
+                    g.load("return RPD.charShield(" + h.id() + ")").call().toint());
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void declarativeShieldAmountSeedsOnFreshAttach() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("shield_seed", tableFromLua(
+                "register_buff{ id='shield_seed', name='ss', shieldAmount=12, shieldType='mana' }",
+                "shield_seed"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("shield_seed");
+            assertTrue(lb.attachTo(h));
+            assertEquals("declarative shieldAmount seeded the pool", 12, ShieldTracker.getShield(h));
+            assertEquals("shieldAmount() reads the field", 12, lb.shieldAmount());
+            assertEquals("shieldType() reads metadata", "mana", lb.shieldType());
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void declarativeShieldAmountFunctionFormWorks() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("shield_fn", tableFromLua(
+                "register_buff{ id='shield_fn', name='sf', " +
+                "shieldAmount=function(state) return 7 end }", "shield_fn"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("shield_fn");
+            assertTrue(lb.attachTo(h));
+            assertEquals("function-form shieldAmount resolved and seeded", 7, ShieldTracker.getShield(h));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void affectBuffDoesNotDoubleSeedOnRefresh() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("shield_stack", tableFromLua(
+                "register_buff{ id='shield_stack', name='ss', shieldAmount=10 }", "shield_stack"));
+        Hero h = freshHero();
+        try {
+            Globals g = globals();
+            g.load("RPD.affectBuff(" + h.id() + ", 'shield_stack', 1)").call();
+            assertEquals(10, ShieldTracker.getShield(h));
+            // re-affect refreshes the existing instance (no re-attach) → pool unchanged
+            g.load("RPD.affectBuff(" + h.id() + ", 'shield_stack', 1)").call();
+            assertEquals("refresh did not re-seed / double the pool", 10, ShieldTracker.getShield(h));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void manaShieldDefenseProcAbsorbsAndSelfDetachesWhenPoolEmpty() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.affectBuff(" + h.id() + ", 'mana_shield', 1)").call();
+            // declarative shieldAmount is 10
+            assertEquals(10, ShieldTracker.getShield(h));
+            // 14 damage: absorbs 10, 4 passes through, pool empty → buff self-detaches
+            assertEquals("leftover after mana_shield exhausted", 4, h.defenseProc(enemy, 14));
+            assertEquals("pool drained", 0, ShieldTracker.getShield(h));
+            assertEquals("mana_shield self-detached when pool emptied",
+                    null, findLuaBuff(h, "mana_shield"));
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
+    }
+
+    @Test
+    public void shieldLeftDefenseProcAbsorbsWithoutDetaching() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.affectBuff(" + h.id() + ", 'shield_left', 1)").call();
+            // declarative shieldAmount is 8
+            assertEquals(8, ShieldTracker.getShield(h));
+            assertEquals("partial absorb returns 0 leftover", 0, h.defenseProc(enemy, 5));
+            assertEquals("pool reduced to 3", 3, ShieldTracker.getShield(h));
+            assertNotNull("shield_left stays attached after a hit (it recharges)",
+                    findLuaBuff(h, "shield_left"));
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
+    }
+
+    @Test
+    public void shieldLeftActRechargesPoolUpToCap() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.affectBuff(" + h.id() + ", 'shield_left', 1)").call();
+            LuaBuff lb = findLuaBuff(h, "shield_left");
+            assertNotNull(lb);
+            assertEquals(8, ShieldTracker.getShield(h));
+            // each act adds 8; cap is 1000
+            for (int i = 0; i < 200; i++) lb.act();
+            assertEquals("recharge capped at ShieldTracker.MAX_AMOUNT", 1000, ShieldTracker.getShield(h));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void multipleShieldBuffsShareOnePool() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.affectBuff(" + h.id() + ", 'mana_shield', 1)").call();
+            g.load("RPD.affectBuff(" + h.id() + ", 'shield_left', 1)").call();
+            // both contribute to the same bearer pool: 10 + 8 = 18
+            assertEquals("shared pool aggregates both shield buffs", 18, ShieldTracker.getShield(h));
+            // 18 damage fully absorbed across both procs; mana_shield sees pool
+            // still > 0 after its own drain only if shield_left hasn't drained
+            // it first — order-independent: total absorb is 18.
+            int leftover = h.defenseProc(enemy, 18);
+            assertEquals("full absorb of 18 across the shared pool", 0, leftover);
+            assertEquals("pool drained to 0", 0, ShieldTracker.getShield(h));
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
+    }
+
+    @Test
+    public void shieldBuffIconShowsCurrentPool() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("shield_disp", tableFromLua(
+                "register_buff{ id='shield_disp', name='sd', shieldAmount=10 }", "shield_disp"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("shield_disp");
+            assertTrue(lb.attachTo(h));
+            assertEquals("icon shows pooled shield", "10", lb.iconTextDisplay());
+            ShieldTracker.absorb(h, 7);
+            assertEquals("icon ticks down to remaining pool", "3", lb.iconTextDisplay());
+            ShieldTracker.absorb(h, 3);
+            // pool empty, level 0, no cooldown → falls through to ""
+            assertEquals("empty pool → no shield text", "", lb.iconTextDisplay());
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void bundleRestoreReseedsDeclarativeShieldBaseline() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("shield_rt", tableFromLua(
+                "register_buff{ id='shield_rt', name='rt', shieldAmount=10 }", "shield_rt"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("shield_rt");
+            assertTrue(lb.attachTo(h));
+            ShieldTracker.absorb(h, 6);          // mid-combat: 10 -> 4
+            assertEquals(4, ShieldTracker.getShield(h));
+
+            Bundle bundle = new Bundle();
+            lb.storeInBundle(bundle);
+            lb.detach();
+            assertEquals("detach does not clear the shared pool by itself", 4, ShieldTracker.getShield(h));
+
+            // Simulate a load: fresh Char object (old pool entry dies with the
+            // old Hero identity) + restored buff re-seeds declarative baseline.
+            Hero loaded = freshHero();
+            try {
+                LuaBuff restored = LuaBuffRegistry.create("shield_rt");
+                restored.restoreFromBundle(bundle);
+                restored.attachTo(loaded);
+                assertEquals("restore re-seeds declarative shieldAmount (mid-combat value not persisted)",
+                        10, ShieldTracker.getShield(loaded));
+            } finally {
+                Actor.remove(loaded);
+            }
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void shieldApiDoesNotReopenLuajava() {
+        Globals g = globals();
+        // Shield API is reachable...
+        assertTrue("RPD.addShield present", g.get("RPD").get("addShield").isfunction());
+        assertTrue("RPD.absorbShield present", g.get("RPD").get("absorbShield").isfunction());
+        // ...and luajava is still stripped.
+        assertTrue("luajava global remains stripped", g.get("luajava").isnil());
+        LuaValue ok = g.load(
+                "return pcall(function() return luajava.bindClass('java.lang.Runtime') end)"
+        ).call();
+        assertFalse("luajava.bindClass still fails with shield API present", ok.toboolean());
     }
 
     // ---- helpers ----

@@ -217,6 +217,14 @@ final class RpdApi {
         // equipped item). id-resolved, no Java object crosses the sandbox.
         rpd.set("encumbranceItemName", new EncumbranceItemName());
         rpd.set("yell", new Yell());
+        // M8b shield API: unified shield-points pool (ShieldTracker) shared by
+        // Lua shield buffs. id/int only across the sandbox (D5'-(a)); the Char
+        // key is resolved here and never exposed to Lua. addShield feeds the
+        // pool, charShield reads it, absorbShield drains it and returns the
+        // leftover damage for a defenseProc to pass back to Char.
+        rpd.set("addShield", new AddShield());
+        rpd.set("charShield", new CharShield());
+        rpd.set("absorbShield", new AbsorbShield());
         return rpd;
     }
 
@@ -607,6 +615,75 @@ final class RpdApi {
                 Gdx.app.error(TAG, "yell threw", e);
             }
             return NIL;
+        }
+    }
+
+    // ---- M8b shield API ----
+
+    /**
+     * {@code RPD.addShield(charId, amt)} — add points to the shared shield pool
+     * ({@link ShieldTracker}) on {@code charId}. Used by shield buffs' attach
+     * (declarative seed is done Java-side in {@link LuaBuff}, but a script can
+     * add more — e.g. a recharge {@code act} callback). Returns NIL on bad
+     * input; never throws.
+     */
+    private static final class AddShield extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue amount) {
+            try {
+                Char target = resolveChar(charId);
+                if (target == null) return NIL;
+                if (!validAmount(amount.isnumber() ? amount.todouble() : -1)) {
+                    Gdx.app.error(TAG, "addShield rejected amount " + amount);
+                    return NIL;
+                }
+                ShieldTracker.addShield(target, amount.toint());
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "addShield threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * {@code RPD.charShield(charId)} — current shield points on {@code charId}
+     * (int), or NIL for a missing/wrong id. Lets a Lua defenseProc decide
+     * whether to self-detach after an absorb.
+     */
+    private static final class CharShield extends OneArgFunction {
+        @Override public LuaValue call(LuaValue charId) {
+            try {
+                Char target = resolveChar(charId);
+                if (target == null) return NIL;
+                return LuaValue.valueOf(ShieldTracker.getShield(target));
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "charShield threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /**
+     * {@code RPD.absorbShield(charId, dmg)} — drain up to {@code dmg} from the
+     * shared shield pool on {@code charId}; returns the leftover damage (0 if
+     * fully absorbed) for the Lua {@code defenseProc} to pass back. Rejects
+     * non-positive / out-of-range damage (passes it through as-is is wrong here
+     * — we return NIL so the caller can detect the misuse rather than silently
+     * nullify a hit).
+     */
+    private static final class AbsorbShield extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue dmg) {
+            try {
+                Char target = resolveChar(charId);
+                if (target == null) return NIL;
+                if (!validAmount(dmg.isnumber() ? dmg.todouble() : -1)) {
+                    Gdx.app.error(TAG, "absorbShield rejected dmg " + dmg);
+                    return NIL;
+                }
+                return LuaValue.valueOf(ShieldTracker.absorb(target, dmg.toint()));
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "absorbShield threw", e);
+                return NIL;
+            }
         }
     }
 
