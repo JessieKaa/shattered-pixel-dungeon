@@ -9,7 +9,10 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Belongings;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroSubClass;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.abilities.ArmorAbility;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.abilities.warrior.HeroicLeap;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.watabou.noosa.Game;
 import com.watabou.utils.Bundle;
@@ -181,12 +184,13 @@ public class LuaTalentRegistryTest {
 	}
 
 	@Test
-	public void tier3_rejectedByMvp() {
-		// codex round-1 fix #3: MOD_ slots have baseMaxPoints=2, so tier 3/4 caps
-		// would be silently rejected by the M7e lower-only guard. MVP limits to [1,2].
+	public void tier3_withClassInsteadOfSubclass_rejected() {
+		// M8d3: tier 3 is now accepted (was MVP-rejected). But tier 3 must key on
+		// `subclass`, not `class` — a registration that supplies `class` (no
+		// `subclass`) is rejected by the tier↔key mutual-exclusion guard.
 		Globals g = cleanGlobals();
-		register(g, "{ id='MOD_EXAMPLE_TALENT', tier=3, class='WARRIOR', maxPoints=2 }");
-		assertEquals("tier=3 must be rejected in MVP (deferred to M8d2)",
+		register(g, "{ id='MOD_TIER3_TALENT', tier=3, class='WARRIOR', maxPoints=3 }");
+		assertEquals("tier=3 with class (no subclass) must be rejected",
 				0, LuaTalentRegistry.size());
 	}
 
@@ -195,6 +199,256 @@ public class LuaTalentRegistryTest {
 		Globals g = cleanGlobals();
 		register(g, "{ id='MOD_EXAMPLE_TALENT', tier='two', class='WARRIOR', maxPoints=2 }");
 		assertEquals("non-int tier must be rejected", 0, LuaTalentRegistry.size());
+	}
+
+	// ---- M8d3: tier 3 (subclass) / tier 4 (armor ability) injection ----
+
+	@Test
+	public void tier3_injectsIntoSubclassTierSlot() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER3_TALENT', tier=3, subclass='BERSERKER', name='t3', maxPoints=3 }");
+
+		ArrayList<LinkedHashMap<Talent, Integer>> talents = freshTalentList();
+		Talent.initSubclassTalents(HeroSubClass.BERSERKER, talents);
+
+		assertEquals("injected at 0 points into tier-3 slot",
+				Integer.valueOf(0), talents.get(2).get(Talent.MOD_TIER3_TALENT));
+		assertEquals("MOD_TIER3_TALENT baseMaxPoints is the enum cap (3)",
+				3, Talent.MOD_TIER3_TALENT.baseMaxPoints());
+		assertEquals("MOD_TIER3_TALENT maxPoints() returns the enum cap (3)",
+				3, Talent.MOD_TIER3_TALENT.maxPoints());
+	}
+
+	@Test
+	public void tier3_doesNotInjectIntoOtherSubclass() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER3_TALENT', tier=3, subclass='BERSERKER', name='t3', maxPoints=3 }");
+
+		ArrayList<LinkedHashMap<Talent, Integer>> talents = freshTalentList();
+		Talent.initSubclassTalents(HeroSubClass.GLADIATOR, talents);
+		assertFalse("BERSERKER-registered tier-3 talent must not appear in GLADIATOR",
+				talents.get(2).containsKey(Talent.MOD_TIER3_TALENT));
+	}
+
+	@Test
+	public void tier3_missingSubclass_rejected() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER3_TALENT', tier=3, name='t3', maxPoints=3 }");
+		assertEquals("tier 3 without subclass must be rejected", 0, LuaTalentRegistry.size());
+	}
+
+	@Test
+	public void tier3_unknownSubclass_rejected() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER3_TALENT', tier=3, subclass='BOGUS', name='t3', maxPoints=3 }");
+		assertEquals("unknown subclass must be rejected", 0, LuaTalentRegistry.size());
+	}
+
+	// ---- M8d3 codex R1: tier↔cap binding (slot baseMaxPoints must match tier) ----
+
+	@Test
+	public void cap2Slot_atTier3_rejected() {
+		// MOD_EXAMPLE_TALENT has baseMaxPoints=2; tier 3 requires a cap-3 slot.
+		// Guards against the cap/domain mismatch the PLAN designed around.
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_EXAMPLE_TALENT', tier=3, subclass='BERSERKER', name='t3', maxPoints=2 }");
+		assertEquals("cap-2 slot at tier 3 must be rejected", 0, LuaTalentRegistry.size());
+	}
+
+	@Test
+	public void cap4Slot_atTier1_rejected() {
+		// MOD_TIER4_TALENT has baseMaxPoints=4; tier 1 requires a cap-2 slot.
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER4_TALENT', tier=1, class='WARRIOR', name='t1', maxPoints=4 }");
+		assertEquals("cap-4 slot at tier 1 must be rejected", 0, LuaTalentRegistry.size());
+	}
+
+	@Test
+	public void cap4Slot_atTier3_rejected() {
+		// MOD_TIER4_TALENT (cap 4) at tier 3 (wants cap 3) — wrong cap.
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER4_TALENT', tier=3, subclass='BERSERKER', name='t3', maxPoints=4 }");
+		assertEquals("cap-4 slot at tier 3 must be rejected", 0, LuaTalentRegistry.size());
+	}
+
+	// ---- M8d3 codex R1: tier↔key true exclusivity (extra keys rejected) ----
+
+	@Test
+	public void tier3_withSubclassAndClass_rejected() {
+		// tier 3 must take 'subclass' ONLY — supplying 'class' too is rejected.
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER3_TALENT', tier=3, subclass='BERSERKER', class='WARRIOR', name='t3', maxPoints=3 }");
+		assertEquals("tier 3 with both subclass and class must be rejected",
+				0, LuaTalentRegistry.size());
+	}
+
+	@Test
+	public void tier4_withArmorAbilityAndClass_rejected() {
+		// tier 4 must take 'armor_ability' ONLY — supplying 'class' too is rejected.
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER4_TALENT', tier=4, armor_ability='HeroicLeap', class='WARRIOR', name='t4', maxPoints=4 }");
+		assertEquals("tier 4 with both armor_ability and class must be rejected",
+				0, LuaTalentRegistry.size());
+	}
+
+	@Test
+	public void tier2_withClassAndSubclass_rejected() {
+		// tier 1/2 must take 'class' ONLY — supplying 'subclass' too is rejected.
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_EXAMPLE_TALENT', tier=2, class='WARRIOR', subclass='BERSERKER', name='t2', maxPoints=2 }");
+		assertEquals("tier 2 with both class and subclass must be rejected",
+				0, LuaTalentRegistry.size());
+	}
+
+	@Test
+	public void tier4_injectsIntoArmorAbilityTierSlot() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER4_TALENT', tier=4, armor_ability='HeroicLeap', name='t4', maxPoints=4 }");
+
+		ArrayList<LinkedHashMap<Talent, Integer>> talents = freshTalentList();
+		Talent.initArmorTalents(new HeroicLeap(), talents);
+
+		assertEquals("injected at 0 points into tier-4 slot",
+				Integer.valueOf(0), talents.get(3).get(Talent.MOD_TIER4_TALENT));
+		assertEquals("MOD_TIER4_TALENT baseMaxPoints is the enum cap (4)",
+				4, Talent.MOD_TIER4_TALENT.baseMaxPoints());
+		assertEquals("MOD_TIER4_TALENT maxPoints() returns the enum cap (4)",
+				4, Talent.MOD_TIER4_TALENT.maxPoints());
+	}
+
+	@Test
+	public void tier4_doesNotInjectIntoOtherArmorAbility() {
+		// Shockwave is a different warrior armor ability (simple class name !=
+		// "HeroicLeap"), so a HeroicLeap-registered tier-4 talent must not inject.
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER4_TALENT', tier=4, armor_ability='HeroicLeap', name='t4', maxPoints=4 }");
+
+		ArrayList<LinkedHashMap<Talent, Integer>> talents = freshTalentList();
+		Talent.initArmorTalents(new com.shatteredpixel.shatteredpixeldungeon.actors.hero.abilities.warrior.Shockwave(), talents);
+		assertFalse("HeroicLeap-registered tier-4 talent must not appear in Shockwave",
+				talents.get(3).containsKey(Talent.MOD_TIER4_TALENT));
+	}
+
+	@Test
+	public void tier4_missingArmorAbility_rejected() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER4_TALENT', tier=4, name='t4', maxPoints=4 }");
+		assertEquals("tier 4 without armor_ability must be rejected", 0, LuaTalentRegistry.size());
+	}
+
+	@Test
+	public void tier4_nonStringArmorAbility_rejected() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER4_TALENT', tier=4, armor_ability=42, name='t4', maxPoints=4 }");
+		assertEquals("non-string armor_ability must be rejected", 0, LuaTalentRegistry.size());
+	}
+
+	@Test
+	public void tier3_onUpgrade_firesOnUpgrade() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER3_TALENT', tier=3, subclass='BERSERKER', name='t3', maxPoints=3, "
+				+ "on_upgrade = function(hero, points) _G.cb_called = true; _G.cb_points = points end }");
+
+		Hero hero = newHero();
+		hero.heroClass = HeroClass.WARRIOR;
+		hero.subClass = HeroSubClass.BERSERKER;
+		Dungeon.hero = hero;
+		try {
+			Talent.initSubclassTalents(HeroSubClass.BERSERKER, hero.talents);
+			hero.upgradeTalent(Talent.MOD_TIER3_TALENT);
+
+			assertTrue("on_upgrade must fire on tier-3 upgrade", g.get("cb_called").toboolean());
+			assertEquals("points is the post-upgrade count", 1, g.get("cb_points").toint());
+		} finally {
+			Dungeon.hero = null;
+			Actor.remove(hero);
+		}
+	}
+
+	@Test
+	public void tier4_onUpgrade_firesOnUpgrade() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER4_TALENT', tier=4, armor_ability='HeroicLeap', name='t4', maxPoints=4, "
+				+ "on_upgrade = function(hero, points) _G.cb_called = true; _G.cb_points = points end }");
+
+		Hero hero = newHero();
+		hero.heroClass = HeroClass.WARRIOR;
+		hero.armorAbility = new HeroicLeap();
+		Dungeon.hero = hero;
+		try {
+			Talent.initArmorTalents(hero.armorAbility, hero.talents);
+			hero.upgradeTalent(Talent.MOD_TIER4_TALENT);
+
+			assertTrue("on_upgrade must fire on tier-4 upgrade", g.get("cb_called").toboolean());
+			assertEquals("points is the post-upgrade count", 1, g.get("cb_points").toint());
+		} finally {
+			Dungeon.hero = null;
+			Actor.remove(hero);
+		}
+	}
+
+	@Test
+	public void tier34_injectionIdempotent_doesNotClobberPoints() {
+		// Re-init must not reset spent points (inject is containsKey-guarded).
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER3_TALENT', tier=3, subclass='BERSERKER', name='t3', maxPoints=3 }");
+
+		ArrayList<LinkedHashMap<Talent, Integer>> talents = freshTalentList();
+		Talent.initSubclassTalents(HeroSubClass.BERSERKER, talents);
+		talents.get(2).put(Talent.MOD_TIER3_TALENT, 2);  // simulate spent points
+		Talent.initSubclassTalents(HeroSubClass.BERSERKER, talents);  // re-init
+		assertEquals("spent points must survive re-init",
+				Integer.valueOf(2), talents.get(2).get(Talent.MOD_TIER3_TALENT));
+	}
+
+	@Test
+	public void tier34_clear_registryEmptyVanillaUntouched() {
+		// C3 for tier 3/4: cleared registry → injectSubclassTalents /
+		// injectArmorTalents are no-ops → vanilla tier-3/tier-4 lists unchanged.
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER3_TALENT', tier=3, subclass='BERSERKER', name='t3', maxPoints=3 }");
+		register(g, "{ id='MOD_TIER4_TALENT', tier=4, armor_ability='HeroicLeap', name='t4', maxPoints=4 }");
+		assertTrue(LuaTalentRegistry.size() >= 2);
+		LuaTalentRegistry.clear();
+		assertEquals(0, LuaTalentRegistry.size());
+
+		ArrayList<LinkedHashMap<Talent, Integer>> subTalents = freshTalentList();
+		Talent.initSubclassTalents(HeroSubClass.BERSERKER, subTalents);
+		assertFalse("cleared registry must not inject tier-3 mod talent",
+				subTalents.get(2).containsKey(Talent.MOD_TIER3_TALENT));
+		assertTrue("vanilla BERSERKER tier-3 talent untouched",
+				subTalents.get(2).containsKey(Talent.ENDLESS_RAGE));
+
+		ArrayList<LinkedHashMap<Talent, Integer>> abilTalents = freshTalentList();
+		Talent.initArmorTalents(new HeroicLeap(), abilTalents);
+		assertFalse("cleared registry must not inject tier-4 mod talent",
+				abilTalents.get(3).containsKey(Talent.MOD_TIER4_TALENT));
+		assertTrue("vanilla HeroicLeap tier-4 talent untouched",
+				abilTalents.get(3).containsKey(Talent.BODY_SLAM));
+	}
+
+	@Test
+	public void tier34_bundleRoundTrip_preservesModTalent() {
+		Globals g = cleanGlobals();
+		register(g, "{ id='MOD_TIER3_TALENT', tier=3, subclass='BERSERKER', name='t3', maxPoints=3, desc='d' }");
+
+		Hero original = new Hero();
+		original.heroClass = HeroClass.WARRIOR;
+		original.subClass = HeroSubClass.BERSERKER;
+		Talent.initSubclassTalents(HeroSubClass.BERSERKER, original.talents);
+		original.talents.get(2).put(Talent.MOD_TIER3_TALENT, 3);
+
+		Bundle b = new Bundle();
+		Talent.storeTalentsInBundle(b, original);
+		assertEquals("mod talent points must be persisted in the tier-3 bundle",
+				3, b.getBundle("talents_tier_3").getInt("MOD_TIER3_TALENT"));
+
+		Hero restored = new Hero();
+		restored.heroClass = HeroClass.WARRIOR;
+		restored.subClass = HeroSubClass.BERSERKER;
+		Talent.restoreTalentsFromBundle(b, restored);
+		assertEquals("tier-3 mod talent points must survive store/restore round-trip",
+				Integer.valueOf(3), restored.talents.get(2).get(Talent.MOD_TIER3_TALENT));
 	}
 
 	// ---- class validation ----
