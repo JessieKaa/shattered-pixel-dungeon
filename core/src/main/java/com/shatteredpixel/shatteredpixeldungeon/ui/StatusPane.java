@@ -29,6 +29,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.effects.CircleArc;
 import com.shatteredpixel.shatteredpixeldungeon.effects.Speck;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaSpellRegistry;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.HeroSprite;
@@ -60,6 +61,10 @@ public class StatusPane extends Component {
 	private Image shieldHP;
 	private Image hp;
 	private BitmapText hpText;
+	// M7d: mana indicator (simplified — text on the HP bar row, large-only).
+	// Visible only when a registered spell uses mana (LuaSpellRegistry guard),
+	// so vanilla runs see no mana UI (C3 zero pollution).
+	private BitmapText mpText;
 	private Button heroInfoOnBar;
 
 	private Image exp;
@@ -145,6 +150,14 @@ public class StatusPane extends Component {
 		hpText.alpha(0.6f);
 		add(hpText);
 
+		// M7d: mana indicator — same row as hpText, right-aligned on the 128px
+		// large HP bar. Scale matches small-mode hpText so it fits the 9px bar.
+		mpText = new BitmapText(PixelScene.pixelFont);
+		mpText.scale.set(PixelScene.align(0.5f));
+		mpText.alpha(0.6f);
+		mpText.visible = false;
+		add(mpText);
+
 		heroInfoOnBar = new Button(){
 			@Override
 			protected void onClick () {
@@ -210,6 +223,14 @@ public class StatusPane extends Component {
 			hpText.x = hp.x + (128 - hpText.width())/2f;
 			hpText.y = hp.y + 1;
 			PixelScene.align(hpText);
+
+			// M7d: mana text shares the HP bar row, right-aligned (128px wide bar
+			// has room at the right edge; avoids the exp row at y+30).
+			mpText.measure();
+			mpText.x = hp.x + 128 - mpText.width();
+			mpText.y = hp.y + (hp.height - (mpText.baseLine() + mpText.scale.y)) / 2f;
+			mpText.y -= 0.001f;
+			PixelScene.align(mpText);
 
 			expText.x = exp.x + (128 - expText.width())/2f;
 			expText.y = exp.y;
@@ -285,6 +306,9 @@ public class StatusPane extends Component {
 	private int oldHP = 0;
 	private int oldShield = 0;
 	private int oldMax = 0;
+	// M7d: MP indicator text cache.
+	private int oldMP = -1;
+	private int oldMPMax = -1;
 
 	@Override
 	public void update() {
@@ -330,6 +354,18 @@ public class StatusPane extends Component {
 			oldMax = max;
 		}
 
+		// M7d: refresh the mana indicator. Guarded by LuaSpellRegistry.hasManaSpell()
+		// so vanilla runs never show it (C3). Large-only — the small layout has no
+		// room without new art assets (deferred).
+		int mp = Dungeon.hero.MP;
+		int mpMax = Dungeon.hero.MPMax;
+		if (oldMP != mp || oldMPMax != mpMax){
+			mpText.text(mp + "/" + mpMax);
+			oldMP = mp;
+			oldMPMax = mpMax;
+		}
+		mpText.visible = large && LuaSpellRegistry.hasManaSpell();
+
 		if (large) {
 			exp.scale.x = (128 / exp.width) * Dungeon.hero.exp / Dungeon.hero.maxExp();
 
@@ -339,6 +375,13 @@ public class StatusPane extends Component {
 			expText.text(Dungeon.hero.exp + "/" + Dungeon.hero.maxExp());
 			expText.measure();
 			expText.x = hp.x + (128 - expText.width())/2f;
+
+			// M7d: re-measure + right-align every frame (BitmapText.text() only
+			// marks dirty; without this the stale empty-text width from layout()
+			// leaves mpText parked at the HP bar's right edge and overflowing).
+			mpText.measure();
+			mpText.x = hp.x + 128 - mpText.width();
+			PixelScene.align(mpText);
 
 		} else {
 			exp.scale.x = ((17 + heroPaneExtraWidth) / exp.width) * Dungeon.hero.exp / Dungeon.hero.maxExp();
@@ -389,6 +432,7 @@ public class StatusPane extends Component {
 		shieldHP.alpha(value);
 		hp.alpha(value);
 		hpText.alpha(0.6f*value);
+		mpText.alpha(0.6f*value);
 		exp.alpha(value);
 		if (expText != null) expText.alpha(0.6f*value);
 		level.alpha(value);

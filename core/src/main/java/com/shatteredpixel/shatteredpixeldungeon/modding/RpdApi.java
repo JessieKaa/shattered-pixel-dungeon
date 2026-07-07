@@ -4,6 +4,7 @@ import com.badlogic.gdx.Gdx;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Blob;
 import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Blizzard;
 import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.ConfusionGas;
@@ -199,6 +200,13 @@ final class RpdApi {
         rpd.set("cellRay", new CellRay());
         rpd.set("zapEffect", new ZapEffect());
         rpd.set("spawnMobNear", new SpawnMobNear());
+        // M7d mana API: hero-only MP primitives (vanilla chars have no mana pool,
+        // so these NIL/return-false on non-Hero targets). Used by mana-mode spells
+        // (heal-on-cooldown style) and the ManaRegen-equivalent of regen burst.
+        rpd.set("heroMana", new HeroMana());
+        rpd.set("heroManaMax", new HeroManaMax());
+        rpd.set("spendMana", new SpendMana());
+        rpd.set("restoreMana", new RestoreMana());
         return rpd;
     }
 
@@ -458,6 +466,75 @@ final class RpdApi {
         @Override public LuaValue call(LuaValue charId) {
             Char c = resolveChar(charId);
             return c == null ? NIL : LuaValue.valueOf(c.name());
+        }
+    }
+
+    // ---- M7d mana API ----
+
+    /** Resolve a char id to a Hero, or null if missing / not a Hero (mana is hero-only). */
+    private static Hero resolveHero(LuaValue idVal) {
+        Char c = resolveChar(idVal);
+        return c instanceof Hero ? (Hero) c : null;
+    }
+
+    /** MP is an int pool — reject fractional/zero/negative amounts up front (round-1 #4). */
+    private static boolean validManaAmount(LuaValue v) {
+        return v.isint() && v.toint() >= 1 && v.toint() <= (int) MAX_AMOUNT;
+    }
+
+    /** {@code RPD.heroMana(heroId)} → current MP (NIL for non-Hero / missing). */
+    private static final class HeroMana extends OneArgFunction {
+        @Override public LuaValue call(LuaValue heroId) {
+            Hero h = resolveHero(heroId);
+            return h == null ? NIL : LuaValue.valueOf(h.MP);
+        }
+    }
+
+    /** {@code RPD.heroManaMax(heroId)} → MP cap (NIL for non-Hero / missing). */
+    private static final class HeroManaMax extends OneArgFunction {
+        @Override public LuaValue call(LuaValue heroId) {
+            Hero h = resolveHero(heroId);
+            return h == null ? NIL : LuaValue.valueOf(h.MPMax);
+        }
+    }
+
+    /** {@code RPD.spendMana(heroId, amt)} → true iff hero had at least amt (deducts). */
+    private static final class SpendMana extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue heroId, LuaValue amount) {
+            try {
+                Hero h = resolveHero(heroId);
+                if (h == null) return LuaValue.FALSE;
+                if (!validManaAmount(amount)) {
+                    Gdx.app.error(TAG, "spendMana rejected amount " + amount + " (need int 1.." + (int) MAX_AMOUNT + ")");
+                    return LuaValue.FALSE;
+                }
+                int amt = amount.toint();
+                if (h.MP < amt) return LuaValue.FALSE;
+                h.MP -= amt;
+                return LuaValue.TRUE;
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "spendMana threw", e);
+                return LuaValue.FALSE;
+            }
+        }
+    }
+
+    /** {@code RPD.restoreMana(heroId, amt)} → true iff hero gained mana (clamped to MPMax). */
+    private static final class RestoreMana extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue heroId, LuaValue amount) {
+            try {
+                Hero h = resolveHero(heroId);
+                if (h == null) return LuaValue.FALSE;
+                if (!validManaAmount(amount)) {
+                    Gdx.app.error(TAG, "restoreMana rejected amount " + amount + " (need int 1.." + (int) MAX_AMOUNT + ")");
+                    return LuaValue.FALSE;
+                }
+                h.MP = Math.min(h.MPMax, h.MP + amount.toint());
+                return LuaValue.TRUE;
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "restoreMana threw", e);
+                return LuaValue.FALSE;
+            }
         }
     }
 

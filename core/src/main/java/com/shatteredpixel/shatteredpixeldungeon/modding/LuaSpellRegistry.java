@@ -18,10 +18,23 @@ public final class LuaSpellRegistry {
 
 	private static final Map<String, LuaTable> spells = new HashMap<>();
 
+	// M7d: flipped true the first time a spell with useMode="mana" registers.
+	// StatusPane gates the MP indicator on this so vanilla runs (no mods → empty
+	// registry) never show a mana UI (C3: vanilla zero pollution, round-2 fix).
+	private static boolean hasManaSpell = false;
+
 	private LuaSpellRegistry() { }
 
 	public static void register(String id, LuaTable table) {
 		spells.put(id, table);
+		if ("mana".equals(table.get("useMode").optjstring("consumable"))) {
+			hasManaSpell = true;
+		}
+	}
+
+	/** True iff some registered spell uses mana (useMode="mana"). Drives StatusPane MP visibility. */
+	public static boolean hasManaSpell() {
+		return hasManaSpell;
 	}
 
 	public static LuaTable getTable(String id) {
@@ -51,5 +64,6 @@ public final class LuaSpellRegistry {
 	/** Test helper — clears registered spells so unit tests start from a clean slate. */
 	public static void clear() {
 		spells.clear();
+		hasManaSpell = false;
 	}
 }

@@ -61,6 +61,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Paralysis;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.PhysicalEmpower;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Recharging;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Regeneration;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.ManaRegen;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.SnipersMark;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.TimeStasis;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo;
@@ -262,6 +263,14 @@ public class Hero extends Char {
 	public int exp = 0;
 	
 	public int HTBoost = 0;
+
+	// M7d: mana pool (dual-track — consumed by useMode="mana" spells, not by
+	// vanilla consumables). Always present on every Hero; in vanilla it simply
+	// never gets spent. MPMax scales with level (see updateMPMax); ManaRegen
+	// slowly refills it. Bundle keys are absent on pre-M7d saves — restore
+	// defaults to a full pool (see restoreFromBundle).
+	public int MP = 10;
+	public int MPMax = 10;
 	
 	private ArrayList<Mob> visibleEnemies;
 
@@ -274,6 +283,7 @@ public class Hero extends Char {
 
 		HP = HT = 20;
 		STR = STARTING_STR;
+		MP = MPMax = 10;
 		
 		belongings = new Belongings( this );
 		
@@ -295,6 +305,15 @@ public class Hero extends Char {
 			HP += Math.max(HT - curHT, 0);
 		}
 		HP = Math.min(HP, HT);
+		updateMPMax();
+	}
+
+	// M7d: recompute the mana cap from level (shape mirrors updateHT's
+	// `20 + 5*(lvl-1)`). Called from updateHT so level-up keeps MPMax in sync.
+	// MP is clamped down — a level drain never strands MP above the new cap.
+	public void updateMPMax(){
+		MPMax = 10 + 2*(lvl - 1);
+		MP = Math.min(MP, MPMax);
 	}
 
 	public int STR() {
@@ -329,6 +348,10 @@ public class Hero extends Char {
 	private static final String LEVEL		= "lvl";
 	private static final String EXPERIENCE	= "exp";
 	private static final String HTBOOST     = "htboost";
+	// M7d: mana pool bundle keys (TAG_ prefix mirrors Char.TAG_HP/HT — avoids
+	// colliding with the MP/MPMax field names). Absent on pre-M7d saves.
+	private static final String TAG_MP      = "MP";
+	private static final String TAG_MPMAX   = "MPMax";
 	
 	@Override
 	public void storeInBundle( Bundle bundle ) {
@@ -350,8 +373,10 @@ public class Hero extends Char {
 		
 		bundle.put( HTBOOST, HTBoost );
 
-		belongings.storeInBundle( bundle );
+		bundle.put( TAG_MP, MP );
+		bundle.put( TAG_MPMAX, MPMax );
 
+		belongings.storeInBundle( bundle );
 		// M3c D3: sidecar marker for a Lua hero. CLASS still stores the host enum
 		// (talentSource) which round-trips cleanly; this key is the authoritative
 		// "this is a Lua hero" marker. See field doc on `luaClassId`.
@@ -389,6 +414,25 @@ public class Hero extends Char {
 		// round-tripped through its own bundle key.
 		if (bundle.contains( LUA_CLASS_ID )) {
 			luaClassId = bundle.getString( LUA_CLASS_ID );
+		}
+
+		// M7d: restore the mana pool. Pre-M7d saves lack both keys — default to a
+		// full pool derived from level (NOT getInt's 0, which would leave the
+		// hero with MP=MPMax=0). MP is clamped to [0, MPMax] to survive a corrupt
+		// out-of-range value. lvl was restored above (L364), so the formula is valid.
+		MPMax = bundle.contains( TAG_MPMAX ) ? bundle.getInt( TAG_MPMAX ) : (10 + 2*(lvl - 1));
+		if (bundle.contains( TAG_MP )) {
+			MP = Math.max(0, Math.min(bundle.getInt( TAG_MP ), MPMax));
+		} else {
+			MP = MPMax;
+		}
+
+		// M7d: ensure ManaRegen is attached. Dungeon.loadGame restores the Hero
+		// via this path (not live()), and Char.restoreFromBundle only re-creates
+		// buffs that were saved — so a pre-M7d save (or any save where the buff
+		// had detached) would otherwise never regen mana. Cheap idempotent guard.
+		if (buff(ManaRegen.class) == null) {
+			Buff.affect( this, ManaRegen.class );
 		}
 	}
 
@@ -568,6 +612,9 @@ public class Hero extends Char {
 		}
 		Buff.affect( this, Regeneration.class );
 		Buff.affect( this, Hunger.class );
+		// M7d: mana regen — mirrors Regeneration (hero-always-on buff). On a save
+		// load this is also handled in restoreFromBundle for pre-M7d saves.
+		Buff.affect( this, ManaRegen.class );
 	}
 	
 	public int tier() {
