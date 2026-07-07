@@ -8,11 +8,11 @@ register_spell {
     image = 3,
     castTime = 1,
     spellCost = 20,
-    targeting = "self",
+    targeting = "cell",
 
-    onUse = function(heroId)
-        if not (RPD and RPD.charPos and RPD.spawnMobNear) then return end
-        local pos = RPD.charPos(heroId)
-        RPD.spawnMobNear("test_mob", pos)
+    onUseAt = function(heroId, cell)
+        if not (RPD and RPD.spawnMobNear) then return end
+        -- M7c: 在玩家选中的 cell 附近召唤(原来在施法者脚下)。
+        RPD.spawnMobNear("test_mob", cell)
     end,
 }
