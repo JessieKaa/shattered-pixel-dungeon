@@ -1208,6 +1208,126 @@ public class RpdApiBuffTest {
         }
     }
 
+    // ---- M8c sprite tint/glow (computeTint) ----
+
+    @Test
+    public void luaBuffTintCharNumberReturnsAuraSpec() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("tint_num", tableFromLua(
+                "register_buff{ id='tint_num', name='t', " +
+                "tintChar=function(self) return 3381759 end }", "tint_num"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("tint_num");
+            assertTrue(lb.attachTo(h));
+            LuaBuff.TintSpec spec = lb.computeTint();
+            assertNotNull("number return → aura spec", spec);
+            assertTrue("number return → aura", spec.aura);
+            assertEquals("color preserved (0x3399FF)", 0x3399FF, spec.color);
+            assertEquals("default rays", 6, spec.rays);
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void luaBuffTintCharTableReturnsAuraSpecWithRays() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("tint_aura", tableFromLua(
+                "register_buff{ id='tint_aura', name='t', " +
+                "tintChar=function(self) return {color=255, rays=4} end }", "tint_aura"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("tint_aura");
+            assertTrue(lb.attachTo(h));
+            LuaBuff.TintSpec spec = lb.computeTint();
+            assertNotNull("{color,rays} → aura spec", spec);
+            assertTrue("table with color → aura", spec.aura);
+            assertEquals("color preserved", 255, spec.color);
+            assertEquals("rays preserved", 4, spec.rays);
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void luaBuffTintCharRgbTableReturnsTintSpec() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("tint_rgb", tableFromLua(
+                "register_buff{ id='tint_rgb', name='t', " +
+                "tintChar=function(self) return {r=0.2, g=0.6, b=1.0, a=0.5} end }",
+                "tint_rgb"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("tint_rgb");
+            assertTrue(lb.attachTo(h));
+            LuaBuff.TintSpec spec = lb.computeTint();
+            assertNotNull("{r,g,b,a} → tint spec", spec);
+            assertFalse("rgb table → tint (not aura)", spec.aura);
+            assertEquals("r preserved", 0.2f, spec.r, 0.001f);
+            assertEquals("g preserved", 0.6f, spec.g, 0.001f);
+            assertEquals("b preserved", 1.0f, spec.b, 0.001f);
+            assertEquals("a preserved", 0.5f, spec.a, 0.001f);
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void luaBuffTintCharColorPrioritizedOverRgb() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("tint_both", tableFromLua(
+                "register_buff{ id='tint_both', name='t', " +
+                "tintChar=function(self) return {color=3381759, rays=5, r=0.2, g=0.6, b=1.0} end }",
+                "tint_both"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("tint_both");
+            assertTrue(lb.attachTo(h));
+            LuaBuff.TintSpec spec = lb.computeTint();
+            assertNotNull("mixed table → spec", spec);
+            assertTrue("color key wins over r/g/b → aura", spec.aura);
+            assertEquals("color value used", 0x3399FF, spec.color);
+            assertEquals("rays used", 5, spec.rays);
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void luaBuffTintCharNilReturnsNullWhenNoCallback() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("tint_none", tableFromLua(
+                "register_buff{ id='tint_none', name='t' }", "tint_none"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("tint_none");
+            assertTrue(lb.attachTo(h));
+            assertEquals("no tintChar callback → null spec", null, lb.computeTint());
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void championOfWaterTintIsBlueAura() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.affectBuff(" + h.id() + ", 'champion_of_water', 1)").call();
+            LuaBuff lb = findLuaBuff(h, "champion_of_water");
+            assertNotNull(lb);
+            LuaBuff.TintSpec spec = lb.computeTint();
+            assertNotNull("champion_of_water has a tint", spec);
+            assertTrue("champion_of_water glow is an aura", spec.aura);
+            assertEquals("water-blue color (0x3399FF)", 0x3399FF, spec.color);
+            assertEquals("5 rays", 5, spec.rays);
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
     /** Register a buff via a one-shot Lua source on a throwaway globals, then return its table. */
     private static org.luaj.vm2.LuaTable tableFromLua(String lua, String id) {
         Globals g = LuaSandbox.exposedGlobals();
