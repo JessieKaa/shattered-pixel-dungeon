@@ -208,7 +208,14 @@ public enum Talent {
 	//enum slot must be pre-declared here because tier keys are Talent constants.
 	//icon 219/220 are legal unused frames in talent_icons.png (512x128 → 0..255);
 	//transparent placeholders, not rendered by MVP tests. Tier 1-2 only (MVP).
-	MOD_EXAMPLE_TALENT(219, 2), MOD_SECOND_TALENT(220, 2);
+	MOD_EXAMPLE_TALENT(219, 2), MOD_SECOND_TALENT(220, 2),
+	//M8d3 (D6(b) 闭合): tier 3/4 mod slots. Vanilla tier3 caps at 3, tier4 at 4;
+	//M7e maxPoints is lowers-only, so the MOD_* slots must declare the right cap
+	//up front via the (icon, maxPoints) constructor. Lua activates one via
+	//register_talent{id="MOD_TIER3_TALENT", tier=3, subclass="BERSERKER", ...}
+	//or {id="MOD_TIER4_TALENT", tier=4, armor_ability="HeroicLeap", ...}.
+	//icon 221/222 are legal unused frames (219/220 taken by the tier1/2 slots).
+	MOD_TIER3_TALENT(221, 3), MOD_TIER4_TALENT(222, 4);
 
 	public static class ImprovisedProjectileCooldown extends FlavourBuff{
 		public int icon() { return BuffIndicator.TIME; }
@@ -1154,6 +1161,10 @@ public enum Talent {
 		}
 		tierTalents.clear();
 
+		//M8d3 (D6(b) 闭合): Lua-injected tier-3 mod talents fill their registered
+		//subclass slot. Single-point hook — the vanilla switch body above is untouched.
+		//With every mod disabled LuaTalentRegistry is empty and this is a no-op (C3).
+		LuaTalentRegistry.injectSubclassTalents(cls, talents);
 	}
 
 	public static void initArmorTalents( Hero hero ){
@@ -1170,6 +1181,12 @@ public enum Talent {
 		for (Talent t : abil.talents()){
 			talents.get(3).put(t, 0);
 		}
+
+		//M8d3 (D6(b) 闭合): Lua-injected tier-4 mod talents fill their registered
+		//armor-ability slot (matched by simple class name, since ArmorAbility is an
+		//abstract class, not an enum). Single-point hook — vanilla loop above untouched.
+		//With every mod disabled LuaTalentRegistry is empty and this is a no-op (C3).
+		LuaTalentRegistry.injectArmorTalents(abil, talents);
 	}
 
 	private static final String TALENT_TIER = "talents_tier_";

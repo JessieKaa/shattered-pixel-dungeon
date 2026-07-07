@@ -729,22 +729,25 @@ public class LuaEngine implements ResourceFinder {
 	}
 
 	/**
-	 * The {@code register_talent(table)} global handed to Lua (M8d1, D6(b) MVP).
+	 * The {@code register_talent(table)} global handed to Lua (M8d1, D6(b)).
 	 * Activates a pre-declared {@code MOD_}-prefixed {@link Talent} enum slot
 	 * (e.g. {@code MOD_EXAMPLE_TALENT}, declared in {@code Talent.java}) and
-	 * injects it into a class's tier via {@link LuaTalentRegistry}. Unlike
+	 * injects it into a tier via {@link LuaTalentRegistry}. Unlike
 	 * {@link RegisterTalentOverrideFunction} (which retunes existing talents),
-	 * this is for NEW talents entering a class's tier list.
+	 * this is for NEW talents entering a tier list.
 	 *
 	 * <p>Validation: {@code id} must start with {@code "MOD_"} and resolve to a
 	 * declared enum constant (vanilla names are rejected — retuning vanilla is
-	 * M7e's job); {@code tier} must be an int in {@code [1,2]} (MVP; MOD_ slots
-	 * have {@code baseMaxPoints=2}, so tier 3/4 caps would be rejected by the
-	 * M7e lower-only guard — deferred to M8d2); {@code class} must be a
-	 * {@code HeroClass} name. {@code name}/{@code title}/{@code desc}/
-	 * {@code maxPoints} are forwarded to {@link LuaTalentOverride#register} so
-	 * the existing {@code Talent.title()}/{@code desc()}/{@code maxPoints()}
-	 * fallback picks them up.
+	 * M7e's job); {@code tier} must be an int in {@code [1,4]}. The tier↔key
+	 * dimension is exclusive: tier 1/2 take {@code class} ({@code HeroClass}
+	 * name), tier 3 takes {@code subclass} ({@code HeroSubClass} name), tier 4
+	 * takes {@code armor_ability} (the {@link com.shatteredpixel.shatteredpixeldungeon.actors.hero.abilities.ArmorAbility}
+	 * simple class name — ArmorAbility is an abstract class, not an enum, so
+	 * the name is matched at inject time rather than {@code valueOf}-ed here).
+	 * {@code name}/{@code title}/{@code desc}/{@code maxPoints} are forwarded to
+	 * {@link LuaTalentOverride#register} so the existing
+	 * {@code Talent.title()}/{@code desc()}/{@code maxPoints()} fallback picks
+	 * them up.
 	 *
 	 * <p>Bad input logs and skips (never throws), mirroring the other
 	 * {@code register_*} globals.
@@ -779,19 +782,59 @@ public class LuaEngine implements ResourceFinder {
 					return NIL;
 				}
 				int tier = tierV.toint();
-				if (tier < 1 || tier > 2) {
-					Gdx.app.error(TAG, "register_talent '" + id + "': tier must be 1-2 (MVP), got "
-							+ tier + ", skipping (tier 3/4 deferred to M8d2)");
+				if (tier < 1 || tier > 4) {
+					Gdx.app.error(TAG, "register_talent '" + id + "': tier must be 1-4, got "
+							+ tier + ", skipping");
 					return NIL;
 				}
-				String className = tbl.get("class").checkjstring();
-				com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass cls;
-				try {
-					cls = com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass.valueOf(className);
-				} catch (IllegalArgumentException e) {
-					Gdx.app.error(TAG, "register_talent '" + id + "': unknown class '"
-							+ className + "', skipping");
-					return NIL;
+				// M8d3: tier↔key is exclusive — exactly one of class/subclass/armor_ability
+				// must be present, matching the tier. Presence is by genuine LuaString
+				// (luaj's isstring() is true for numbers, which aren't real key values).
+				LuaValue classV = tbl.get("class");
+				LuaValue subClassV = tbl.get("subclass");
+				LuaValue armorAbilV = tbl.get("armor_ability");
+				boolean hasClass = classV instanceof org.luaj.vm2.LuaString;
+				boolean hasSubClass = subClassV instanceof org.luaj.vm2.LuaString;
+				boolean hasArmorAbil = armorAbilV instanceof org.luaj.vm2.LuaString;
+				int keyCount = (hasClass ? 1 : 0) + (hasSubClass ? 1 : 0) + (hasArmorAbil ? 1 : 0);
+				com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass cls = null;
+				com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroSubClass subClass = null;
+				String armorAbilityName = null;
+				if (tier <= 2) {
+					if (keyCount != 1 || !hasClass) {
+						Gdx.app.error(TAG, "register_talent '" + id + "': tier " + tier
+								+ " requires exactly 'class' (no subclass/armor_ability), skipping");
+						return NIL;
+					}
+					String className = classV.tojstring();
+					try {
+						cls = com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass.valueOf(className);
+					} catch (IllegalArgumentException e) {
+						Gdx.app.error(TAG, "register_talent '" + id + "': unknown class '"
+								+ className + "', skipping");
+						return NIL;
+					}
+				} else if (tier == 3) {
+					if (keyCount != 1 || !hasSubClass) {
+						Gdx.app.error(TAG, "register_talent '" + id + "': tier 3 requires exactly 'subclass'"
+								+ " (no class/armor_ability), skipping");
+						return NIL;
+					}
+					String subName = subClassV.tojstring();
+					try {
+						subClass = com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroSubClass.valueOf(subName);
+					} catch (IllegalArgumentException e) {
+						Gdx.app.error(TAG, "register_talent '" + id + "': unknown subclass '"
+								+ subName + "', skipping");
+						return NIL;
+					}
+				} else { // tier == 4
+					if (keyCount != 1 || !hasArmorAbil) {
+						Gdx.app.error(TAG, "register_talent '" + id + "': tier 4 requires exactly 'armor_ability'"
+								+ " (no class/subclass), skipping");
+						return NIL;
+					}
+					armorAbilityName = armorAbilV.tojstring();
 				}
 				LuaValue nameV = tbl.get("name");
 				LuaValue titleV = tbl.get("title");
@@ -813,7 +856,8 @@ public class LuaEngine implements ResourceFinder {
 				// registry, fired by Talent.onTalentUpgraded on upgrade.
 				LuaValue onUpgradeRaw = tbl.get("on_upgrade");
 				LuaValue onUpgrade = onUpgradeRaw.isfunction() ? onUpgradeRaw : null;
-				LuaTalentRegistry.register(talent, tier, cls, onUpgrade);
+				boolean registered = LuaTalentRegistry.register(talent, tier, cls, subClass, armorAbilityName, onUpgrade);
+				if (!registered) return NIL;
 				// Forward desc/maxPoints/title(name) to the M7e override path so
 				// Talent.maxPoints()/desc()/title() reuse the existing fallback.
 				LuaTalentOverride.register(talent, tbl);
