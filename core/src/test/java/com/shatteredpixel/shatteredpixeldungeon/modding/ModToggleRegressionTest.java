@@ -3,6 +3,7 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.backends.headless.HeadlessApplication;
 import com.badlogic.gdx.backends.headless.HeadlessApplicationConfiguration;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent;
 import com.watabou.noosa.Game;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -67,6 +68,7 @@ public class ModToggleRegressionTest {
 		assertEquals(0, LuaNpcRegistry.size());
 		assertEquals(0, LuaShopRegistry.size());
 		assertEquals("M6c: disabled mod must contribute 0 Lua buffs", 0, LuaBuffRegistry.size());
+		assertEquals("M7e: disabled mod must contribute 0 talent overrides", 0, LuaTalentOverride.size());
 
 		// Representative IDs across entry + every directory must be absent. Guards against a
 		// size==0 pass hiding a stray registration path.
@@ -130,6 +132,10 @@ public class ModToggleRegressionTest {
 		assertTrue("M6c cloak loads", LuaBuffRegistry.contains("cloak"));
 		assertTrue("M6c chaos_shield_left loads", LuaBuffRegistry.contains("chaos_shield_left"));
 		assertEquals("16 M6c buff ports", 16, LuaBuffRegistry.size());
+		// M7e: 2 talent override scripts (hearty_meal lower+desc, iron_will desc-only).
+		assertEquals("2 M7e talent overrides", 2, LuaTalentOverride.size());
+		assertTrue("M7e hearty_meal override loads", LuaTalentOverride.get(Talent.HEARTY_MEAL) != null);
+		assertTrue("M7e iron_will override loads", LuaTalentOverride.get(Talent.IRON_WILL) != null);
 
 		// Exact sizes: catches a missing/misnamed script that ID-checks alone could miss.
 		assertEquals("10 item dir scripts + 1 entry item", 11, LuaItemRegistry.size());
