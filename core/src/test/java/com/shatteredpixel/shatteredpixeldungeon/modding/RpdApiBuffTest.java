@@ -10,6 +10,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.ToxicGas;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Bleeding;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Charm;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.MagicalSleep;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Paralysis;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Terror;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Vertigo;
@@ -727,6 +728,167 @@ public class RpdApiBuffTest {
         } finally {
             Actor.remove(h);
         }
+    }
+
+    // ---- M8a sleep-lock hook ----
+
+    @Test
+    public void luaBuffSleepLockReturnsTrue() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("lock_true", tableFromLua(
+                "register_buff{ id='lock_true', name='l', " +
+                "sleepLock=function(self) return true end }", "lock_true"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("lock_true");
+            assertTrue(lb.attachTo(h));
+            assertTrue("sleepLock Lua callback returns true", lb.sleepLock(h.id()));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void luaBuffSleepLockNilPassthroughFalse() throws Exception {
+        LuaBuffRegistry.clear();
+        // No sleepLock field at all → must default to false (no lock).
+        LuaBuffRegistry.register("no_lock", tableFromLua(
+                "register_buff{ id='no_lock', name='n' }", "no_lock"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("no_lock");
+            assertTrue(lb.attachTo(h));
+            assertFalse("missing sleepLock → false", lb.sleepLock(h.id()));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void luaBuffSleepLockNonBooleanReturnsFalse() throws Exception {
+        LuaBuffRegistry.clear();
+        // A numeric return is not a boolean → false (fail-open, never lock on garbage).
+        LuaBuffRegistry.register("lock_num", tableFromLua(
+                "register_buff{ id='lock_num', name='x', " +
+                "sleepLock=function(self) return 1 end }", "lock_num"));
+        Hero h = freshHero();
+        try {
+            LuaBuff lb = LuaBuffRegistry.create("lock_num");
+            assertTrue(lb.attachTo(h));
+            assertFalse("non-boolean sleepLock return → false", lb.sleepLock(h.id()));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void dispatchSleepLockTrueWhenSleepLockBuffAttached() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("lock2", tableFromLua(
+                "register_buff{ id='lock2', name='l', " +
+                "sleepLock=function(self) return true end }", "lock2"));
+        Hero h = freshHero();
+        try {
+            LuaBuffRegistry.create("lock2").attachTo(h);
+            assertTrue("dispatchSleepLock true when a sleepLock buff is attached",
+                    LuaBuff.dispatchSleepLock(h));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void dispatchSleepLockFalseWithNoLuaBuff() throws Exception {
+        LuaBuffRegistry.clear();
+        Hero h = freshHero();
+        try {
+            assertFalse("dispatchSleepLock false with no LuaBuff attached",
+                    LuaBuff.dispatchSleepLock(h));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void dispatchSleepLockNullSafe() {
+        assertFalse("dispatchSleepLock null-safe", LuaBuff.dispatchSleepLock(null));
+    }
+
+    @Test
+    public void dispatchSleepLockComposesMultipleBuffs() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("lock_yes", tableFromLua(
+                "register_buff{ id='lock_yes', name='y', " +
+                "sleepLock=function(self) return true end }", "lock_yes"));
+        LuaBuffRegistry.register("lock_no", tableFromLua(
+                "register_buff{ id='lock_no', name='n', " +
+                "sleepLock=function(self) return false end }", "lock_no"));
+        Hero h = freshHero();
+        try {
+            LuaBuffRegistry.create("lock_no").attachTo(h);
+            LuaBuffRegistry.create("lock_yes").attachTo(h);
+            assertTrue("any sleepLock=true buff wins the compose",
+                    LuaBuff.dispatchSleepLock(h));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void magicalSleepSurvivesDamageWithSleepLock() throws Exception {
+        LuaBuffRegistry.clear();
+        LuaBuffRegistry.register("ml_lock", tableFromLua(
+                "register_buff{ id='ml_lock', name='l', " +
+                "sleepLock=function(self) return true end }", "ml_lock"));
+        Hero h = freshHero();
+        Hero src = freshHero();
+        try {
+            // MagicalSleep.attachTo detaches an ALLY at full HP (toohealthy);
+            // use HP<HT so it sticks.
+            h.HT = 50; h.HP = 40;
+            // Skip Hero.damage's interrupt() path (touches GameScene.cellSelector,
+            // null in headless). super.damage() — where the sleep-lock hook lives —
+            // still runs.
+            h.damageInterrupt = false;
+            LuaBuffRegistry.create("ml_lock").attachTo(h);
+            assertNotNull("MagicalSleep attaches", Buff.affect(h, MagicalSleep.class));
+            h.damage(5, src);
+            assertNotNull("sleepLock suppresses wake-on-damage", h.buff(MagicalSleep.class));
+            assertEquals("HP still deducted under sleep-lock", 35, h.HP);
+        } finally {
+            Actor.remove(h);
+            Actor.remove(src);
+        }
+    }
+
+    @Test
+    public void magicalSleepDetachesOnDamageWithoutSleepLock() throws Exception {
+        LuaBuffRegistry.clear();
+        Hero h = freshHero();
+        Hero src = freshHero();
+        try {
+            h.HT = 50; h.HP = 40;
+            h.damageInterrupt = false;
+            assertNotNull("MagicalSleep attaches", Buff.affect(h, MagicalSleep.class));
+            h.damage(5, src);
+            assertEquals("MagicalSleep detached on damage without sleep-lock",
+                    null, h.buff(MagicalSleep.class));
+            assertEquals("HP deducted", 35, h.HP);
+        } finally {
+            Actor.remove(h);
+            Actor.remove(src);
+        }
+    }
+
+    @Test
+    public void anesthesiaAssetIsUpgraded() {
+        LuaEngine.init();
+        org.luaj.vm2.LuaTable tbl = LuaBuffRegistry.getTable("anesthesia");
+        assertNotNull("anesthesia loaded from test_mod", tbl);
+        assertTrue("anesthesia.sleepLock is a function",
+                tbl.get("sleepLock").isfunction());
+        assertTrue("anesthesia no longer marked degraded",
+                tbl.get("degraded").isnil());
     }
 
     // ---- M7a stolen loot persistence ----

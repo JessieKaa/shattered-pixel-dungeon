@@ -343,6 +343,44 @@ public class LuaBuff extends Buff {
                 state);
     }
 
+    // ---- M8a sleep-lock hook ----
+    //
+    // sleepLock lets a Lua buff suppress the "wake on damage" behaviour in
+    // {@link Char#damage} (the MagicalSleep detach at line ~918) without
+    // touching HP deduction — the bearer still takes damage but stays asleep.
+    // Fail-open: a missing function, Lua error, or non-boolean return yields
+    // false so a broken script can never permanently pin a Char asleep.
+
+    /** Whether this buff wants to suppress waking on damage for its bearer. */
+    public boolean sleepLock(int selfId) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return false;
+        try {
+            LuaValue fn = tbl.get("sleepLock");
+            if (!fn.isfunction()) return false;
+            LuaValue res = fn.call(LuaValue.valueOf(selfId));
+            return res.isboolean() && res.toboolean();
+        } catch (Exception e) {
+            Gdx.app.error(TAG, "sleepLock callback threw", e);
+            return false;
+        }
+    }
+
+    /**
+     * Compose every attached LuaBuff's {@code sleepLock} vote. Returns
+     * {@code true} if any attached Lua buff wants sleep-lock (so a single
+     * anesthesia-style buff suppresses waking). Null-safe.
+     */
+    public static boolean dispatchSleepLock(Char self) {
+        if (self == null) return false;
+        for (Buff b : self.buffs()) {
+            if (b instanceof LuaBuff && ((LuaBuff) b).sleepLock(self.id())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public int icon() {
         return readIntField("icon", BuffIndicator.NONE);

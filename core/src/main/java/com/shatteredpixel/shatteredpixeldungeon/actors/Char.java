@@ -916,7 +916,11 @@ public abstract class Char extends Actor {
 			Buff.detach( this, Frost.class );
 		}
 		if (this.buff(MagicalSleep.class) != null){
-			Buff.detach(this, MagicalSleep.class);
+			// M8a sleep-lock: a Lua buff (e.g. anesthesia) may suppress the
+			// wake-on-damage detach. HP is still deducted below either way.
+			if (!LuaBuff.dispatchSleepLock(this)) {
+				Buff.detach(this, MagicalSleep.class);
+			}
 		}
 		if (this.buff(Doom.class) != null && !isImmune(Doom.class)){
 			damage *= 1.67f;
