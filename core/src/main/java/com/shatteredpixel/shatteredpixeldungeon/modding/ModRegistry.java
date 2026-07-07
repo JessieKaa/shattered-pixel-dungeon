@@ -35,6 +35,7 @@ public final class ModRegistry {
 	private static synchronized void scanFrom(List<ModManifest> result) {
 		scanned = result;
 		initialized = true;
+		applyEnabledBalanceOverrides();
 	}
 
 	public static synchronized List<ModManifest> all() {
@@ -59,6 +60,30 @@ public final class ModRegistry {
 
 	public static void setEnabled(String id, boolean enabled) {
 		GameSettings.put(prefKey(id), enabled);
+		// Re-merge balance overrides so toggling a balance mod takes effect
+		// immediately (and disabling one clears its overrides). Guarded on
+		// initialized so a pre-scan toggle doesn't trigger a scan here — the
+		// eventual scanFrom will apply overrides then. scanFrom also calls
+		// applyEnabledBalanceOverrides, so scan-time merging stays consistent.
+		synchronized (ModRegistry.class) {
+			if (initialized) applyEnabledBalanceOverrides();
+		}
+	}
+
+	/**
+	 * Reset {@link BalanceConfig} to defaults then re-apply every enabled mod's
+	 * balance overrides, in scan order (later mods win per-key). Idempotent —
+	 * rescans and enable toggles both converge to the same global state. Called
+	 * from {@link #scanFrom} and {@link #setEnabled}. Must hold the ModRegistry
+	 * monitor (both callers synchronize on {@code ModRegistry.class}).
+	 */
+	private static void applyEnabledBalanceOverrides() {
+		BalanceConfig.resetToDefaults();
+		for (ModManifest m : scanned) {
+			if (isEnabled(m.id)) {
+				BalanceConfig.applyModOverrides(m.balance);
+			}
+		}
 	}
 
 	private static ModManifest lookup(String id) {

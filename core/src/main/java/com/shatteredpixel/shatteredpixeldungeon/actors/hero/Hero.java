@@ -198,6 +198,7 @@ import com.shatteredpixel.shatteredpixeldungeon.items.armor.ClothArmor;
 import com.shatteredpixel.shatteredpixeldungeon.items.bags.VelvetPouch;
 import com.shatteredpixel.shatteredpixeldungeon.items.food.Food;
 import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfIdentify;
+import com.shatteredpixel.shatteredpixeldungeon.modding.BalanceConfig;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaHeroClass;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaHeroRegistry;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaItemRegistry;
@@ -269,8 +270,8 @@ public class Hero extends Char {
 	// never gets spent. MPMax scales with level (see updateMPMax); ManaRegen
 	// slowly refills it. Bundle keys are absent on pre-M7d saves — restore
 	// defaults to a full pool (see restoreFromBundle).
-	public int MP = 10;
-	public int MPMax = 10;
+	public int MP = BalanceConfig.MANA_BASE;
+	public int MPMax = BalanceConfig.MANA_BASE;
 	
 	private ArrayList<Mob> visibleEnemies;
 
@@ -283,7 +284,7 @@ public class Hero extends Char {
 
 		HP = HT = 20;
 		STR = STARTING_STR;
-		MP = MPMax = 10;
+		MP = MPMax = BalanceConfig.MANA_BASE;
 		
 		belongings = new Belongings( this );
 		
@@ -312,7 +313,7 @@ public class Hero extends Char {
 	// `20 + 5*(lvl-1)`). Called from updateHT so level-up keeps MPMax in sync.
 	// MP is clamped down — a level drain never strands MP above the new cap.
 	public void updateMPMax(){
-		MPMax = 10 + 2*(lvl - 1);
+		MPMax = BalanceConfig.MANA_BASE + BalanceConfig.MANA_PER_LEVEL * (lvl - 1);
 		MP = Math.min(MP, MPMax);
 	}
 
@@ -420,7 +421,7 @@ public class Hero extends Char {
 		// full pool derived from level (NOT getInt's 0, which would leave the
 		// hero with MP=MPMax=0). MP is clamped to [0, MPMax] to survive a corrupt
 		// out-of-range value. lvl was restored above (L364), so the formula is valid.
-		MPMax = bundle.contains( TAG_MPMAX ) ? bundle.getInt( TAG_MPMAX ) : (10 + 2*(lvl - 1));
+		MPMax = bundle.contains( TAG_MPMAX ) ? bundle.getInt( TAG_MPMAX ) : (BalanceConfig.MANA_BASE + BalanceConfig.MANA_PER_LEVEL * (lvl - 1));
 		if (bundle.contains( TAG_MP )) {
 			MP = Math.max(0, Math.min(bundle.getInt( TAG_MP ), MPMax));
 		} else {

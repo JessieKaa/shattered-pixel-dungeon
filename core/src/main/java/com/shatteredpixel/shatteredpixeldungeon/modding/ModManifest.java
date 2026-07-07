@@ -2,6 +2,9 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import com.badlogic.gdx.utils.JsonValue;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -32,8 +35,18 @@ public final class ModManifest {
 	 */
 	public final String entry;
 
+	/**
+	 * Optional {@code balance} overrides declared in {@code mod.json} (M9c). Keys
+	 * are the canonical {@link BalanceConfig} names (e.g. {@code mana_regen_delay},
+	 * {@code shield_decay_per_turn}); values are numbers. Empty (never null) when
+	 * the manifest has no {@code balance} block. Merged into {@link BalanceConfig}
+	 * by {@link ModRegistry} for enabled mods at scan/enable time.
+	 */
+	public final Map<String, Double> balance;
+
 	private ModManifest(String id, String name, String version, int spdVersion,
-	                    String author, boolean defaultEnabled, String description, String entry) {
+	                    String author, boolean defaultEnabled, String description, String entry,
+	                    Map<String, Double> balance) {
 		this.id = id;
 		this.name = name;
 		this.version = version;
@@ -42,6 +55,7 @@ public final class ModManifest {
 		this.default_enabled = defaultEnabled;
 		this.description = description;
 		this.entry = entry;
+		this.balance = balance;
 	}
 
 	public static ModManifest fromJson(JsonValue v) {
@@ -81,7 +95,31 @@ public final class ModManifest {
 		String entry = optionalString(v, "entry", null);
 		validateEntryPath(entry);
 
-		return new ModManifest(id, name, version, spdVersion, author, defaultEnabled, description, entry);
+		Map<String, Double> balance = parseBalance(v.get("balance"));
+
+		return new ModManifest(id, name, version, spdVersion, author, defaultEnabled, description, entry, balance);
+	}
+
+	/**
+	 * Parse the optional {@code balance} object. Null/absent → empty map (mod
+	 * has no balance overrides). Non-object → IllegalArgumentException (strict,
+	 * matches the rest of fromJson). Each value must be a number; keys are
+	 * preserved as-is (canonicalization is {@link BalanceConfig}'s job).
+	 */
+	private static Map<String, Double> parseBalance(JsonValue node) {
+		if (node == null) return Collections.emptyMap();
+		if (!node.isObject()) {
+			throw new IllegalArgumentException("balance must be an object, got " + typeDesc(node));
+		}
+		Map<String, Double> map = new LinkedHashMap<>();
+		for (JsonValue child = node.child; child != null; child = child.next) {
+			if (!child.isLong() && !child.isDouble()) {
+				throw new IllegalArgumentException(
+						"balance." + child.name + " must be a number, got " + typeDesc(child));
+			}
+			map.put(child.name, child.asDouble());
+		}
+		return Collections.unmodifiableMap(map);
 	}
 
 	private static String requireString(JsonValue v, String key) {
