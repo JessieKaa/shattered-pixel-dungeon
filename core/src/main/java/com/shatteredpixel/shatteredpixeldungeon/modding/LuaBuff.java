@@ -67,6 +67,8 @@ public class LuaBuff extends Buff {
     private boolean restoring = false;
     private boolean permanent = false;
     private LuaTable state;
+    /** M8c: which tint kind fx(true) last applied (TINT_NONE/AURA/TINT). Transient — cosmetic, not persisted. */
+    private transient int appliedTint = TINT_NONE;
 
     /** Required for {@code Reflection.newInstance} during Bundle restore. */
     public LuaBuff() {
@@ -160,6 +162,11 @@ public class LuaBuff extends Buff {
                 }
             }
         }
+        // super.attachTo already fired fx(true) before the Lua attachTo callback
+        // ran; if tintChar reads state initialised in attachTo, that first fire
+        // saw stale state. Re-fire now so the first visible tint is correct.
+        // fx(true) self-clears its previous application, so this never doubles.
+        if (target.sprite != null) fx(true);
         return true;
     }
 
@@ -341,6 +348,127 @@ public class LuaBuff extends Buff {
                 LuaValue.valueOf(id()),
                 target == null ? LuaValue.NIL : LuaValue.valueOf(target.id()),
                 state);
+    }
+
+    // ---- M8c sprite tint/glow (cosmetic) ----
+    //
+    // Overrides Buff.fx(boolean on) — the canonical SPD buff→sprite coupling
+    // (ChampionEnemy/Frost use the same hook). Buff.attachTo/detach already gate
+    // fx on target.sprite != null, and Char.updateSpriteState re-fires fx(true)
+    // on sprite link / save restore, so tint re-applies automatically after load.
+    // No static dispatch (unlike M7a attackSkill): tint is pure visual, per-buff.
+    //
+    // Lua `tintChar(selfId, state)` returns:
+    //   nil / no fn     → no tint
+    //   number (int)    → sprite.aura(color, DEFAULT_AURA_RAYS)   (glow)
+    //   {color=, rays=} → sprite.aura(color, rays)                (glow, custom rays)
+    //   {r=,g=,b=[,a]}  → sprite.tint(r,g,b,a)                    (multiplicative tint)
+    // `color` takes priority over `r/g/b` when both are present.
+    //
+    // The sprite's aura/tint slot is single and global (clearAura/resetColor
+    // clear the whole slot, not per-buff), so this is best-effort last-wins
+    // cosmetic — same constraint SPD's ChampionEnemy/Invulnerability share.
+    // `appliedTint` only tracks what THIS buff last applied so fx(true) can
+    // self-clear on a spec change and fx(false) clears the right type; it does
+    // NOT guarantee the slot still belongs to this buff.
+
+    private static final int TINT_NONE = 0;
+    private static final int TINT_AURA = 1;
+    private static final int TINT_TINT = 2;
+    private static final int DEFAULT_AURA_RAYS = 6;
+    private static final float DEFAULT_TINT_A = 0.5f;
+
+    /** Parsed result of the Lua {@code tintChar} callback; null = no tint. */
+    static final class TintSpec {
+        final boolean aura;
+        final int color;
+        final int rays;
+        final float r, g, b, a;
+
+        private TintSpec(boolean aura, int color, int rays, float r, float g, float b, float a) {
+            this.aura = aura;
+            this.color = color;
+            this.rays = rays;
+            this.r = r; this.g = g; this.b = b; this.a = a;
+        }
+        static TintSpec aura(int color, int rays) {
+            return new TintSpec(true, color, rays, 0f, 0f, 0f, 0f);
+        }
+        static TintSpec tint(float r, float g, float b, float a) {
+            return new TintSpec(false, 0, 0, r, g, b, a);
+        }
+    }
+
+    /**
+     * Resolve the Lua {@code tintChar} callback to a {@link TintSpec}; {@code null}
+     * if absent/nil/unparseable. Pure (no sprite access) so it is headless-
+     * testable the same way M7a's {@code attackProc}/{@code defenseProc} are.
+     */
+    TintSpec computeTint() {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return null;
+        LuaValue fn = tbl.get("tintChar");
+        if (!fn.isfunction()) return null;
+        LuaValue res;
+        try {
+            // 2-arg call uses call(a,b), not invoke(varargs) — matches the
+            // existing attachTo callback dispatch (LuaJ 3.0.1 signature).
+            res = fn.call(LuaValue.valueOf(id()), state);
+        } catch (Exception e) {
+            Gdx.app.error(TAG, "tintChar callback threw", e);
+            return null;
+        }
+        if (res == null || res.isnil()) return null;
+        if (res.isnumber()) {
+            return TintSpec.aura(res.toint(), DEFAULT_AURA_RAYS);
+        }
+        if (res.istable()) {
+            LuaValue color = res.get("color");
+            if (color.isnumber()) {
+                int rays = res.get("rays").optint(DEFAULT_AURA_RAYS);
+                return TintSpec.aura(color.toint(), rays);
+            }
+            LuaValue r = res.get("r");
+            LuaValue g = res.get("g");
+            LuaValue b = res.get("b");
+            if (r.isnumber() && g.isnumber() && b.isnumber()) {
+                return TintSpec.tint((float) r.todouble(), (float) g.todouble(),
+                        (float) b.todouble(),
+                        (float) res.get("a").optdouble(DEFAULT_TINT_A));
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public void fx(boolean on) {
+        if (target == null || target.sprite == null) return;
+        if (on) {
+            // Self-clear any previously applied effect first so a spec type
+            // change (aura↔tint↔nil) or an updateSpriteState re-fire leaves no
+            // residue; then apply the fresh spec (nil → only cleared).
+            clearAppliedTint();
+            TintSpec spec = computeTint();
+            if (spec == null) {
+                appliedTint = TINT_NONE;
+                return;
+            }
+            if (spec.aura) {
+                target.sprite.aura(spec.color, spec.rays);
+                appliedTint = TINT_AURA;
+            } else {
+                target.sprite.tint(spec.r, spec.g, spec.b, spec.a);
+                appliedTint = TINT_TINT;
+            }
+        } else {
+            clearAppliedTint();
+        }
+    }
+
+    private void clearAppliedTint() {
+        if (appliedTint == TINT_AURA) target.sprite.clearAura();
+        else if (appliedTint == TINT_TINT) target.sprite.resetColor();
+        appliedTint = TINT_NONE;
     }
 
     @Override
