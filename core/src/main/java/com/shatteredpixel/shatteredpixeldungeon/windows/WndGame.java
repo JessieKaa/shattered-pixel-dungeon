@@ -119,7 +119,7 @@ public class WndGame extends Window {
 		SaveSlotService.addMenuButtons(this);
 		// --- Fork end ---
 
-		// --- Fork(modding-M5b): mod toggle UI (delegates to modding subpackage; debug-only) ---
+		// --- Fork(modding-M5b): mod toggle UI (delegates to modding subpackage; M9: ships in release) ---
 		ModdingService.addMenuButtons(this);
 		// --- Fork end ---
 

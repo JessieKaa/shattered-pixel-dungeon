@@ -3,18 +3,17 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.ui.RedButton;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndGame;
-import com.watabou.utils.DeviceCompat;
 
 import java.util.Locale;
 
 /**
  * Single-point hook into {@link WndGame} for the M5b mod-toggle UI. Adds a "Mods" button that opens
  * {@link WndModManager}. Mirrors {@code SaveSlotService.addMenuButtons} (single-point fork hook in
- * the same constructor) and {@code LuaDebugService.addMenuButton} (debug-only gating).
+ * the same constructor).
  *
- * <p>The whole entry is gated on {@link DeviceCompat#isDebug()} so nothing here ships in release —
- * the mod UI is M5-experimental and must not pollute the release in-game menu (R7). Labels are
- * hardcoded ZH/EN because {@link com.shatteredpixel.shatteredpixeldungeon.messages.Messages#get}
+ * <p>Ships in release as of M9 (modding is a core fork feature — players must be able to toggle
+ * mods). M5 originally gated this debug-only (R7); M9 release opens it. Labels are hardcoded
+ * ZH/EN because {@link com.shatteredpixel.shatteredpixeldungeon.messages.Messages#get}
  * does not reliably resolve keys for fork classes (see CLAUDE.md).
  */
 public final class ModdingService {
@@ -27,10 +26,8 @@ public final class ModdingService {
 
 	private ModdingService() {}
 
-	/** Hook called from {@link WndGame}; no-op unless this is a debug build (R7). */
+	/** Hook called from {@link WndGame}; adds the Mods button (M9: ships in release). */
 	public static void addMenuButtons(WndGame wnd) {
-		if (!DeviceCompat.isDebug()) return;
-
 		RedButton mods = new RedButton(LANG_ZH ? MENU_MODS_ZH : MENU_MODS_EN) {
 			@Override
 			protected void onClick() {
