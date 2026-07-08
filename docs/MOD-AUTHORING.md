@@ -1,7 +1,7 @@
 # Mod 创作指南(MOD-AUTHORING)
 
-> **基线**:本文档基于 **M12a 代码基线**(commit `da6dae7f1`,versionCode **896**)核对撰写。
-> **最后更新**:2026-07-08。
+> **基线**:本文档基于 **M12c 代码基线**(master 含 M12b desktop zip 导入 + M12c android SAF 导入,master tip `ba8ec5129`,versionCode **896**)核对撰写。
+> **最后更新**:2026-07-09。
 > API 签名 / schema / 校验规则全部逐行对照 `ModManifest.java` / `ModScanner.java` / `LuaEngine.java` / `RpdApi.java` 当前代码。**代码变更时本文档需同步更新**(见第 8 节「防 drift」)。
 >
 > 本 fork 的 modding 平台与上游 00-Evan 的 Shattered Pixel Dungeon **不兼容**(上游不支持 Lua mod)。与姐妹项目 Remished Dungeon(NYRDS)的脚本**也不直接兼容** —— 我们是自研的 luaj 子集 API(见第 5 节)。
@@ -597,11 +597,61 @@ register_spell {
 
 ## 7. 安装与分发
 
-> **当前代码实状(M12a)**:游戏**没有**一键 zip 导入 UI(无 `JFileChooser` / SAF / `ModInstaller`)。下面第 7.1 是**当前唯一**的安装方式;7.2 的 zip 导入属 **M12b/c 规划,尚未实现**,这里只描述规划方向,不能照抄为现有功能。
+> **当前代码实状(M12b + M12c)**:游戏**内置 zip 一键导入** —— desktop(M12b,Swing `JFileChooser`)和 android(M12c,SAF `ACTION_OPEN_DOCUMENT`)**都已实现并默认开启**。导入 UI 由平台 launcher 注册(`DesktopLauncher` / `AndroidLauncher` 各注册一个 `ModImporter`);iOS 暂无实现,按钮自动隐藏(不崩)。除一键导入外,手动放 `mods_user/` 仍然可用(power user / 无 UI 场景)。
 
-### 7.1 手动安装(当前可用)
+mod 只有两种来源,加载逻辑完全相同,只是物理位置和 origin 角标不同:
 
-外部 mod 放在可写目录 **`mods_user/`** 下,结构与内置 mod 完全一样:
+- **内置** —— 打包进 APK/jar(`core/src/main/assets/mods/<id>/`),角标 `[内建]`(英文 `[built-in]`)。
+- **外部** —— 玩家导入或手动放进可写 `mods_user/<id>/`,角标 `[外部]`(英文 `[external]`)。
+
+### 7.1 一键导入 zip(desktop + android)
+
+玩家侧流程(无需任何存储权限 —— desktop 走文件选择器,android 走 SAF 内容 URI):
+
+1. 游戏菜单 → **模组管理** → 点底部 **「导入模组 (.zip)」** 按钮(英文 `Import Mod (.zip)`)。
+2. 弹出系统文件选择器(desktop = Swing `JFileChooser` 过滤 `.zip`;android = SAF,可选 Downloads / Files / 云端任意 SAF 可达位置)。
+3. 选一个 `.zip` → 游戏自动**校验 + 解压**到 `mods_user/<id>/`(worker 线程,不卡 UI)→ 结果行显示绿色「已导入:xxx,重启游戏后生效。」
+4. **重启游戏** → 新 mod 出现在列表(角标 `[外部]`)→ 勾选启用 → **再重启** → 脚本加载生效。
+
+> 导入只是落文件,**不 hot-reload**(M12a 重启契约不变)。结果行用颜色区分:绿色成功 / 红色错误 / 灰色取消。
+
+#### zip 打包契约(`ModInstaller`,创作者打包时遵守)
+
+导入器会严格校验 zip,违反则**整包拒绝并清理**(不会半装)。规则:
+
+| 规则 | 细节 | 失败码 |
+|---|---|---|
+| **mod.json 位置** | 必须在 **zip 根**,或 **唯一一个顶层目录** 里。两个顶层目录都带 mod.json → 拒绝(歧义) | `bad_manifest` |
+| **id 以 mod.json 为准** | 目标目录**总是** `mods_user/<manifest.id>`,**不管 zip 顶层目录叫什么**(zip 顶层目录名可 ≠ id,会被重命名为 id) | — |
+| **条目数上限** | zip 内文件/目录条目 ≤ **256** | `too_many_entries` |
+| **解压体积上限** | 解压后总大小 ≤ **64 MB** | `zip_too_large` |
+| **路径穿越防御** | 条目名禁止:绝对路径(首字符 `/`)、盘符(`X:`)、反斜杠 `\`、`.` / `..` 段。**每条 entry 校验后才落盘**,恶意目录(如 `../evil/`)也逃不出 staging | `invalid_zip` |
+| **manifest 合法** | 能被 `ModManifest.fromJson` 解析(id 正则 / 字段类型严格) | `bad_manifest` |
+| **版本匹配** | `spd_version == Game.versionCode`(**896**) | `version_mismatch` |
+| **不覆盖已存在** | `mods_user/<id>/` 已存在 → **拒绝,不覆盖**。更新需先在文件夹删旧版 | `already_exists` |
+
+实现细节(`ModInstaller.installFromStream`):先解压到 staging 目录 `.staging-<uuid>`,校验 manifest 通过后 `moveTo` 到 `mods_user/<id>`(原子-ish),任何失败都删 staging。回调恰触发一次(`onSuccess(id)` / `onError(code)` / `onCancel`)。
+
+#### 导入错误信息(玩家会看到的)
+
+模组管理器把错误码本地化成一行提示(ZH/EN 硬编码,不走 Messages.get):
+
+| 错误码 | 玩家看到(ZH) |
+|---|---|
+| `io_error` | 导入失败(读写错误)。 |
+| `invalid_zip` | 压缩包无效或已损坏。 |
+| `too_many_entries` | 压缩包内文件过多。 |
+| `zip_too_large` | 压缩包解压后过大(超过 64MB)。 |
+| `bad_manifest` | 模组描述文件(mod.json)无效。 |
+| `version_mismatch` | 模组与当前游戏版本不兼容。 |
+| `already_exists` | 该模组已存在,如需更新请先在文件夹删除旧版本。 |
+| `saf_unavailable`(仅 android) | 导入失败(SAF 不可用)。 |
+
+> 创作者分发 zip 时,按上表自检可避免绝大多数导入失败。最常见踩坑:① 把 mod.json 放进嵌套两层目录;② zip 顶层目录名用了大写但 id 是小写(其实没关系,id 以 mod.json 为准,但会让玩家困惑);③ `spd_version` 写错 → `version_mismatch`。
+
+### 7.2 手动安装(power user / iOS / 无 UI)
+
+外部 mod 也可以直接放进可写目录 **`mods_user/`**,结构与内置 mod 完全一样:
 
 ```
 <可写目录>/mods_user/<id>/
@@ -612,50 +662,50 @@ register_spell {
 
 `mods_user/` 由 `Gdx.files.local("mods_user/")` 解析(`ModScanner.externalModsRoot`):
 
-- **Android** = app 内部 files 目录(`getFilesDir()`)—— **无需任何存储权限**,但用户不可见,需要 root 或 `adb push` 才能直接写。
+- **Android** = app 内部 files 目录(`getFilesDir()`)—— **无需存储权限**,但用户不可见,需 root 或 `adb push` 才能直接写(所以普通玩家走 7.1 的 SAF 导入)。
 - **Desktop** = 游戏工作目录下的 `mods_user/` 文件夹(可见,直接拖文件进去)。
 
-安装步骤:
-1. 把 `<id>/` 整个文件夹放进 `mods_user/`。
-2. **重启游戏** → `ModScanner.scan()` 扫到它,标 `origin = EXTERNAL`。
-3. 游戏菜单 → **模组管理** → 看到该 mod,标签 `[外部]`(英文 `[external]`)→ 勾选启用。
-4. **再重启** → 该 mod 的脚本被加载,注册生效。
+步骤:把 `<id>/` 整个文件夹放进 `mods_user/` → 重启 → 模组管理器看到它(角标 `[外部]`)→ 勾选 → 再重启生效。
 
-> 内置 mod(打包进 APK)显示 `[内建]`(英文 `[built-in]`)。两者结构、加载逻辑完全相同,只是物理位置和 origin 标签不同。
+> 适用场景:① iOS(无导入 UI,按钮隐藏);② desktop 玩家想跳过选择器直接拖;③ 开发期 `adb push` 调试外部 mod 加载。普通玩家首选 7.1。
 
-### 7.2 zip 分发(建议的打包方式)
+### 7.3 origin 角标
 
-虽然游戏暂无导入 UI,但**推荐创作者以 zip 分发**,玩家手动解压到 `mods_user/`。zip 结构建议(为未来 M12b/c 导入 UI 铺路):
+模组管理器每个 mod 行末尾带角标,让玩家区分来源(`WndModManager.ModCheckBox.originTag`):
 
-**推荐 A — mod.json 在 zip 根**:
+- `[内建]` / `[built-in]` —— 打包进游戏的 mod(`assets/mods/`)。
+- `[外部]` / `[external]` —— 一键导入或手动放进 `mods_user/` 的 mod。
+
+id 冲突时 **builtin 胜、external 被跳过**([§6.5](#65-id-冲突规则)),所以外部副本盖不掉打包版本。
+
+### 7.4 给创作者的打包建议
+
+推荐的 zip 结构(二选一,都能被 7.1 的导入器接受):
+
+**A — mod.json 在 zip 根**(最简):
 ```
 my_mod.zip
 ├── mod.json
 ├── init.lua
 └── scripts/...
 ```
-玩家解压时需先建 `mods_user/my_mod/` 再解压进去(保证目录名 == mod id)。
 
-**推荐 B — 唯一顶层目录**:
+**B — 唯一顶层目录**(目录名随意,不必等于 id;导入器会按 mod.json 的 id 重命名):
 ```
 my_mod.zip
-└── my_mod/            ← 目录名必须 == mod.json 里的 id
+└── my_mod/            ← 目录名可任意(导入后重命名为 mods_user/<id>)
     ├── mod.json
     ├── init.lua
     └── scripts/...
 ```
-玩家直接解压到 `mods_user/`,得到 `mods_user/my_mod/...`。
 
-> 关键:`mods_user/` 下**直接子目录的名字**必须等于 `mod.json` 的 `id`(校验规则 3,见 [§2](#2-modjson-schema))。所以 zip 顶层目录名必须和 id 一致,或 mod.json 在 zip 根由玩家手动放目录。
+**不要**这样打包(会被拒):
+- 嵌套两层目录(`zip/a/b/mod.json`)→ `bad_manifest`(mod.json 不在根也不在唯一顶层 dir)。
+- 两个顶层目录各带 mod.json → `bad_manifest`(歧义)。
+- zip 里含绝对路径 / 反斜杠 / `..` 条目(某些 Windows 压缩工具会塞)→ `invalid_zip`。
+- 解压超 64MB(塞了大图片/音频)→ `zip_too_large`(平台美术本就走 Java sprite 类,不靠 mod 资源;mod 只该带 lua 脚本)。
 
-### 7.3 M12b/c 规划(尚未实现,仅作预告)
-
-路线图上的后续里程碑(代码里**尚未实现**,不要假设可用):
-- **M12b** — desktop 端 zip 一键导入(`JFileChooser` 选 zip → 解压到 `mods_user/`)。
-- **M12c** — android 端 SAF 导入(`ContentResolver` + `openDocument`)。
-- 导入时的 zip 校验(条目数上限、解压体积上限、路径穿越禁止、`mod.json` 必须在根或唯一顶层 dir)等契约,要等实现后才有定义。
-
-当前(2026-07-08)分发 = **手动放 `mods_user/<id>/`**。
+> 当前平台**不随包加载 mod 自带美术资源** —— mob/ally 精灵走白名单(`crab`/`rat`/`slime`/...,见 [§4.2](#42-register_mob--register_ally)),物品 `image` 走原版图片索引。所以 mod 的 zip 应该只有 `mod.json` + `.lua` 脚本,体积很小,远低于 64MB / 256 entry 上限。
 
 ---
 
@@ -695,7 +745,7 @@ SPD 默认 libgdx `logLevel = 2`(LOG_ERROR),**`Gdx.app.log` / `System.err.printl
 
 ### 8.4 防 drift(给后续维护者)
 
-本文档基于 **M12a** 代码基线撰写。代码改了之后,API 参考**可能漂移**。更新检查清单:
+本文档基于 **M12c** 代码基线撰写。代码改了之后,API 参考**可能漂移**。更新检查清单:
 
 | 改了什么 | 查哪里 |
 |---|---|
@@ -705,6 +755,8 @@ SPD 默认 libgdx `logLevel = 2`(LOG_ERROR),**`Gdx.app.log` / `System.err.printl
 | RPD.* 新增/改签名 | `RpdApi.build()`(`RpdApi.java:142`)+ 各函数类 `call(...)` |
 | 脚本子目录 | `LuaEngine.loadXxxScripts`(`LuaEngine.java:212` 起) |
 | 沙箱剥离项 | `LuaSandbox.exposedGlobals`(`LuaSandbox.java:95`) |
+| zip 导入契约 / 错误码 | `ModInstaller`(`ModInstaller.java`,cap + `isSafeEntryName` + 错误码常量)+ `WndModManager` 的 `TXT_ZH`/`TXT_EN` |
+| 平台导入器(desktop/android) | `ModImporter`(seam + `Holder`)+ `DesktopModImporter` / `AndroidSafModImporter` + 各 `Launcher` 的 `setPlatformImpl` |
 
 理想方案是从注解/javadoc 自动生成 API 参考(留作 `processor` 模块的后续扩展);在那之前,本文档顶部「最后更新」日期是 drift 的唯一防线。
 
