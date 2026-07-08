@@ -143,7 +143,7 @@ public class ModToggleRegressionTest {
 
 		// Exact sizes: catches a missing/misnamed script that ID-checks alone could miss.
 		assertEquals("10 item dir scripts + 1 entry item", 11, LuaItemRegistry.size());
-		assertEquals("test_mob + M6a PoC + 6 M6b PoC mobs", 8, LuaMobRegistry.size());
+		assertEquals("test_mob + M6a PoC + 6 M6b PoC + 10 M10a mobs", 18, LuaMobRegistry.size());
 		assertEquals(1, LuaAllyRegistry.size());
 		assertEquals(1, LuaHeroRegistry.size());
 		assertEquals("test_spell + 8 M6d representative spells", 9, LuaSpellRegistry.size());
