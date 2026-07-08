@@ -146,7 +146,7 @@ public class ModToggleRegressionTest {
 		assertEquals("test_mob + M6a PoC + 6 M6b PoC mobs", 8, LuaMobRegistry.size());
 		assertEquals(1, LuaAllyRegistry.size());
 		assertEquals(1, LuaHeroRegistry.size());
-		assertEquals("test_spell + 8 M6d representative spells", 9, LuaSpellRegistry.size());
+		assertEquals("test_spell + 8 M6d + 22 M10a spells", 31, LuaSpellRegistry.size());
 		assertEquals("3 NPC scripts (test_npc + town_portal + town_return)", 3, LuaNpcRegistry.size());
 		assertEquals(1, LuaShopRegistry.size());
 	}
