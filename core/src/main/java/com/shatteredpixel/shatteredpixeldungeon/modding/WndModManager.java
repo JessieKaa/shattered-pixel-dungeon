@@ -4,6 +4,7 @@ import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
 import com.shatteredpixel.shatteredpixeldungeon.ui.CheckBox;
 import com.shatteredpixel.shatteredpixeldungeon.ui.Icons;
+import com.shatteredpixel.shatteredpixeldungeon.ui.RedButton;
 import com.shatteredpixel.shatteredpixeldungeon.ui.RenderedTextBlock;
 import com.shatteredpixel.shatteredpixeldungeon.ui.ScrollPane;
 import com.shatteredpixel.shatteredpixeldungeon.ui.Window;
@@ -37,6 +38,9 @@ public class WndModManager extends Window {
 	private static final int CHECK_GAP = 1;
 	private static final int DESC_GAP = 4;
 	private static final int HINT_HEIGHT = 18;
+	// M12b: import button + 1-line result block sit between the scroll list and the hint.
+	private static final int IMPORT_BTN_HEIGHT = 16;
+	private static final int RESULT_HEIGHT = 14;
 
 	private static final boolean LANG_ZH =
 			Locale.getDefault().getLanguage().equalsIgnoreCase("zh")
@@ -51,11 +55,37 @@ public class WndModManager extends Window {
 		TXT_ZH.put("hint", "更改在重启游戏后生效。");
 		TXT_ZH.put("origin_builtin", "[内建]");
 		TXT_ZH.put("origin_external", "[外部]");
+		// M12b: mod zip import
+		TXT_ZH.put("import_button", "导入模组 (.zip)");
+		TXT_ZH.put("import_start", "请在弹出的对话框中选择 zip…");
+		TXT_ZH.put("import_ok", "已导入:%s,重启游戏后生效。");
+		TXT_ZH.put("import_cancel", "已取消导入。");
+		TXT_ZH.put("err_io_error", "导入失败(读写错误)。");
+		TXT_ZH.put("err_invalid_zip", "压缩包无效或已损坏。");
+		TXT_ZH.put("err_too_many_entries", "压缩包内文件过多。");
+		TXT_ZH.put("err_zip_too_large", "压缩包解压后过大(超过 64MB)。");
+		TXT_ZH.put("err_bad_manifest", "模组描述文件(mod.json)无效。");
+		TXT_ZH.put("err_version_mismatch", "模组与当前游戏版本不兼容。");
+		TXT_ZH.put("err_already_exists", "该模组已存在,如需更新请先在文件夹删除旧版本。");
+		TXT_ZH.put("err_unknown", "导入失败(%s)。");
 		TXT_EN.put("title", "Mods");
 		TXT_EN.put("empty", "No mods found.");
 		TXT_EN.put("hint", "Changes apply after restart.");
 		TXT_EN.put("origin_builtin", "[built-in]");
 		TXT_EN.put("origin_external", "[external]");
+		// M12b: mod zip import
+		TXT_EN.put("import_button", "Import Mod (.zip)");
+		TXT_EN.put("import_start", "Pick a zip in the dialog…");
+		TXT_EN.put("import_ok", "Imported: %s. Restart to load.");
+		TXT_EN.put("import_cancel", "Import cancelled.");
+		TXT_EN.put("err_io_error", "Import failed (I/O error).");
+		TXT_EN.put("err_invalid_zip", "Invalid or corrupted zip.");
+		TXT_EN.put("err_too_many_entries", "Zip has too many files.");
+		TXT_EN.put("err_zip_too_large", "Zip is too large (over 64MB unpacked).");
+		TXT_EN.put("err_bad_manifest", "Invalid mod manifest (mod.json).");
+		TXT_EN.put("err_version_mismatch", "Mod is incompatible with this game version.");
+		TXT_EN.put("err_already_exists", "This mod already exists. Remove the old copy first to update.");
+		TXT_EN.put("err_unknown", "Import failed (%s).");
 	}
 
 	private static String txt(String key) {
@@ -63,6 +93,25 @@ public class WndModManager extends Window {
 		String s = m.get(key);
 		return s != null ? s : key;
 	}
+
+	/** Localize a {@code %s} template (import_ok / err_unknown). */
+	private static String txtf(String key, String arg) {
+		String tpl = txt(key);
+		int i = tpl.indexOf("%s");
+		if (i < 0) return tpl;
+		return tpl.substring(0, i) + arg + tpl.substring(i + 2);
+	}
+
+	/** Map a {@link ModInstaller} error code to a localized result string. */
+	private static String errorText(String code) {
+		String key = "err_" + code;
+		String localized = txt(key);
+		if (localized.equals(key)) return txtf("err_unknown", code);   // unmapped code → fallback
+		return localized;
+	}
+
+	/** M12b: single-line import result block, updated from the picker callback (render thread). */
+	private RenderedTextBlock importResult;
 
 	public WndModManager() {
 		super();
@@ -75,9 +124,24 @@ public class WndModManager extends Window {
 		int hintTop = HEIGHT - HINT_HEIGHT;
 		int listTop = (int) title.bottom() + MARGIN * 2;
 
+		// M12b: when a platform picker is registered, carve out a bottom band for the import
+		// button + a result line. When none is registered (android pre-M12c, iOS) the layout
+		// collapses to the M12a form (no button, full-height list) — no crash.
+		boolean importerAvailable = ModImporter.get() != null;
+		int btnTop = -1;
+		int resultTop = -1;
+		int listBottom;
+		if (importerAvailable) {
+			resultTop = hintTop - MARGIN - RESULT_HEIGHT;
+			btnTop = resultTop - MARGIN - IMPORT_BTN_HEIGHT;
+			listBottom = btnTop - MARGIN;
+		} else {
+			listBottom = hintTop;
+		}
+
 		ScrollPane pane = new ScrollPane(new Component());
 		add(pane);
-		pane.setRect(0, listTop, WIDTH, hintTop - listTop);
+		pane.setRect(0, listTop, WIDTH, listBottom - listTop);
 		Component content = pane.content();
 
 		List<ModManifest> mods = ModRegistry.all();
@@ -108,11 +172,49 @@ public class WndModManager extends Window {
 		}
 		content.setRect(0, 0, WIDTH, y);
 
+		if (importerAvailable) {
+			RedButton importBtn = new RedButton(txt("import_button"), 7) {
+				@Override
+				protected void onClick() {
+					ModImporter imp = ModImporter.get();
+					if (imp == null) return;
+					// The picker runs off the render thread; it hops the callback back here.
+					showImportResult(txt("import_start"), 0xCCCCCC);
+					imp.pickZip(new ModImporter.ImportCallback() {
+						@Override public void onSuccess(String modId) {
+							showImportResult(txtf("import_ok", modId), 0x88FF88);
+						}
+						@Override public void onError(String code) {
+							showImportResult(errorText(code), 0xFF8888);
+						}
+						@Override public void onCancel() {
+							showImportResult(txt("import_cancel"), 0xCCCCCC);
+						}
+					});
+				}
+			};
+			importBtn.setRect(MARGIN, btnTop, WIDTH - MARGIN * 2, IMPORT_BTN_HEIGHT);
+			add(importBtn);
+
+			importResult = PixelScene.renderTextBlock("", 6);
+			importResult.maxWidth(WIDTH - MARGIN * 2);
+			importResult.setPos(MARGIN, resultTop);
+			add(importResult);
+		}
+
 		RenderedTextBlock hint = PixelScene.renderTextBlock(txt("hint"), 6);
 		hint.maxWidth(WIDTH - MARGIN * 2);
 		hint.hardlight(0xFFFF88);
 		hint.setPos(MARGIN, hintTop);
 		add(hint);
+	}
+
+	/** Update the import-result line. Runs on the render thread (callback hops back via postRunnable). */
+	private void showImportResult(String text, int color) {
+		if (importResult == null || text == null) return;
+		importResult.text(text);
+		importResult.hardlight(color);
+		PixelScene.align(importResult);
 	}
 
 	/**
