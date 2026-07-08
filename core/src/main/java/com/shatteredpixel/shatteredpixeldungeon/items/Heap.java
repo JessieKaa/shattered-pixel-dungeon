@@ -46,6 +46,7 @@ import com.shatteredpixel.shatteredpixeldungeon.items.weapon.missiles.darts.Dart
 import com.shatteredpixel.shatteredpixeldungeon.items.weapon.missiles.darts.TippedDart;
 import com.shatteredpixel.shatteredpixeldungeon.journal.Document;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaMaterial;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.ItemSprite;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.watabou.noosa.audio.Sample;
@@ -238,9 +239,15 @@ public class Heap implements Bundlable {
 				} else {
 					burnt = true;
 				}
+			} else if (item instanceof LuaMaterial) {
+				Item transformed = ((LuaMaterial) item).burnTransform();
+				if (transformed != null) {
+					replace(item, transformed);
+					burnt = true;
+				}
 			}
 		}
-		
+
 		if (burnt || evaporated) {
 			
 			if (Dungeon.level.heroFOV[pos]) {
@@ -332,9 +339,15 @@ public class Heap implements Bundlable {
 				frozen = true;
 			} else if (item instanceof Bomb && ((Bomb) item).fuse != null){
 				frozen = frozen || ((Bomb) item).fuse.freeze();
+			} else if (item instanceof LuaMaterial) {
+				Item transformed = ((LuaMaterial) item).freezeTransform();
+				if (transformed != null) {
+					replace(item, transformed);
+					frozen = true;
+				}
 			}
 		}
-		
+
 		if (frozen) {
 			if (isEmpty()) {
 				destroy();
