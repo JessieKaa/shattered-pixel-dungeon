@@ -59,6 +59,7 @@ final class ModTestSupport {
 		LuaTalentRegistry.clear();
 		LuaPainterRegistry.clear();
 		LuaTrapRegistry.clear();
+		LuaLevelRegistry.clear(); // populated by register_level via loadModEntryScripts (not loadXxxScripts)
 		LuaEngine.resetForTests();
 	}
 
