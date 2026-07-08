@@ -819,6 +819,11 @@ public abstract class Char extends Actor {
 			}
 		}
 
+		// M10c: hasteLevel — Remished haste hook, composed across all LuaBuffs as
+		// clamp(1.1^sum, 0.25, 4.0). Applied after the M7a speed loop so it
+		// multiplies on top of per-buff speed/speedMultiplier amendments.
+		speed *= LuaBuff.dispatchHasteMultiplier(this);
+
 		return speed;
 	}
 
@@ -983,6 +988,12 @@ public abstract class Char extends Actor {
 			sprite.showStatusWithIcon(CharSprite.POSITIVE, Integer.toString(buff(BrokenSeal.WarriorShield.class).maxShield()), FloatingText.SHIELDING);
 			shield.activate();
 		}
+
+		// M10c: damage — Remished charGotDamage hook, composed across all LuaBuffs
+		// in attach order (return-consuming). Post-resistance, pre-shield/pre-HP.
+		// Clamped ≥0 so a buggy/hostile script returning negative damage cannot
+		// bypass the method's early dmg<0 guard and heal the bearer via HP-=dmg.
+		dmg = Math.max(0, LuaBuff.dispatchDamage(this, dmg, src));
 
 		int shielded = dmg;
 		dmg = ShieldBuff.processDamage(this, dmg, src);
@@ -1278,6 +1289,9 @@ public abstract class Char extends Actor {
 		float stealth = 0;
 
 		stealth += Obfuscation.stealthBoost(this, glyphLevel(Obfuscation.class));
+
+		// M10c: stealthBonus — Remished stealth hook, summed across all LuaBuffs.
+		stealth += LuaBuff.dispatchStealthBonus(this);
 
 		return stealth;
 	}

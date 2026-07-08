@@ -3,6 +3,7 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 import com.badlogic.gdx.Gdx;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
+import com.shatteredpixel.shatteredpixeldungeon.sprites.CharSprite;
 import com.shatteredpixel.shatteredpixeldungeon.ui.BuffIndicator;
 import com.watabou.utils.Bundle;
 import com.watabou.utils.Reflection;
@@ -69,6 +70,8 @@ public class LuaBuff extends Buff {
     private LuaTable state;
     /** M8c: which tint kind fx(true) last applied (TINT_NONE/AURA/TINT). Transient — cosmetic, not persisted. */
     private transient int appliedTint = TINT_NONE;
+    /** M10c: which CharSprite.State fx(true) last added (charSpriteStatus). Transient — cosmetic, not persisted. */
+    private transient CharSprite.State appliedState = null;
 
     /** Required for {@code Reflection.newInstance} during Bundle restore. */
     public LuaBuff() {
@@ -259,20 +262,29 @@ public class LuaBuff extends Buff {
                 LuaValue.valueOf(selfId), LuaValue.valueOf(enemyId), LuaValue.valueOf(damage));
     }
 
-    /** Amend the bearer's damage-reduction roll (armor-style DR). */
+    /** Amend the bearer's damage-reduction roll (armor-style DR).
+     *  M10c: also folds the Remished {@code drBonus} increment (additive) on top of the M7b value. */
     public int drRoll(int selfId, int dr) {
         LuaTable tbl = luaTable();
         if (tbl == null) return dr;
-        return LuaItemCallbacks.callOptInt(tbl, "drRoll", dr,
+        int m7b = LuaItemCallbacks.callOptInt(tbl, "drRoll", dr,
                 LuaValue.valueOf(selfId), LuaValue.valueOf(dr));
+        int bonus = LuaItemCallbacks.callOptInt(tbl, "drBonus", 0,
+                LuaValue.valueOf(selfId), state);
+        return m7b + bonus;
     }
 
-    /** Amend the bearer's movement-speed multiplier (float). */
+    /** Amend the bearer's movement-speed multiplier (float).
+     *  M10c: also folds the Remished {@code speedMultiplier} factor (multiplicative —
+     *  BodyArmor returns 0.9, a factor not a delta) onto the M7b value. */
     public float speed(int selfId, float spd) {
         LuaTable tbl = luaTable();
         if (tbl == null) return spd;
-        return LuaItemCallbacks.callOptFloat(tbl, "speed", spd,
+        float m7b = LuaItemCallbacks.callOptFloat(tbl, "speed", spd,
                 LuaValue.valueOf(selfId), LuaValue.valueOf(spd));
+        float mult = LuaItemCallbacks.callOptFloat(tbl, "speedMultiplier", 1f,
+                LuaValue.valueOf(selfId), state);
+        return m7b * mult;
     }
 
     // ---- M7b skill + charAct hooks ----
@@ -285,20 +297,30 @@ public class LuaBuff extends Buff {
     // combat read sites — Char.hit() and Stone.proc() — via the static helpers
     // below, which compose every attached LuaBuff in attach order.
 
-    /** Amend the bearer's attackSkill (to-hit). int in/out; float boundary at the dispatch helper. */
+    /** Amend the bearer's attackSkill (to-hit). int in/out; float boundary at the dispatch helper.
+     *  M10c: also folds the Remished {@code attackSkillBonus} increment (additive) on top of the
+     *  M7b transform value — both compose, either alone passes through. */
     public int attackSkill(int selfId, int atk) {
         LuaTable tbl = luaTable();
         if (tbl == null) return atk;
-        return LuaItemCallbacks.callOptInt(tbl, "attackSkill", atk,
+        int m7b = LuaItemCallbacks.callOptInt(tbl, "attackSkill", atk,
                 LuaValue.valueOf(selfId), LuaValue.valueOf(atk));
+        int bonus = LuaItemCallbacks.callOptInt(tbl, "attackSkillBonus", 0,
+                LuaValue.valueOf(selfId), state);
+        return m7b + bonus;
     }
 
-    /** Amend the bearer's defenseSkill (evasion). int in/out; float boundary at the dispatch helper. */
+    /** Amend the bearer's defenseSkill (evasion). int in/out; float boundary at the dispatch helper.
+     *  M10c: also folds the Remished {@code defenceSkillBonus} increment (additive). Note the
+     *  British spelling — kept verbatim from Remished so scripts port directly. */
     public int defenseSkill(int selfId, int def) {
         LuaTable tbl = luaTable();
         if (tbl == null) return def;
-        return LuaItemCallbacks.callOptInt(tbl, "defenseSkill", def,
+        int m7b = LuaItemCallbacks.callOptInt(tbl, "defenseSkill", def,
                 LuaValue.valueOf(selfId), LuaValue.valueOf(def));
+        int bonus = LuaItemCallbacks.callOptInt(tbl, "defenceSkillBonus", 0,
+                LuaValue.valueOf(selfId), state);
+        return m7b + bonus;
     }
 
     /**
@@ -446,6 +468,104 @@ public class LuaBuff extends Buff {
         return false;
     }
 
+    // ---- M10c remished callback hooks ----
+    //
+    // Four Remished-named hooks that have no M7a/M7b equivalent. Each mirrors the
+    // M7b pattern: an instance method that fail-open reads the Lua field, plus a
+    // static dispatcher that composes every attached LuaBuff in attach order.
+    // Sum semantics (regen/haste/stealth) match the NYRDS canonical consumers;
+    // damage is return-consuming and composed in attach order (NYRDS charGotDamage).
+
+    /** M10c: this buff's regenerationBonus increment (NYRDS: summed, then healRate=1.2^sum). */
+    private int regenerationBonus(int selfId) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return 0;
+        return LuaItemCallbacks.callOptInt(tbl, "regenerationBonus", 0,
+                LuaValue.valueOf(selfId), state);
+    }
+
+    /** Sum every attached LuaBuff's {@code regenerationBonus}. Null-safe. */
+    public static int dispatchRegenBonus(Char c) {
+        if (c == null) return 0;
+        int sum = 0;
+        for (Buff b : c.buffs()) {
+            if (b instanceof LuaBuff) sum += ((LuaBuff) b).regenerationBonus(c.id());
+        }
+        return sum;
+    }
+
+    /** M10c: this buff's hasteLevel contribution (NYRDS: summed, speed*=1.1^sum clamped). */
+    private float hasteLevel(int selfId) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return 0f;
+        return LuaItemCallbacks.callOptFloat(tbl, "hasteLevel", 0f,
+                LuaValue.valueOf(selfId), state);
+    }
+
+    /**
+     * Compose every attached LuaBuff's {@code hasteLevel} into a movement-speed
+     * multiplier: {@code clamp(1.1^sum, 0.25, 4.0)}. Positive sum = faster. This
+     * mirrors NYRDS {@code Char.timeScale} (sum + pow + clamp) with a positive
+     * exponent because SPD {@link Char#speed} returns higher = faster, whereas
+     * NYRDS timeScale multiplies action time (lower = faster).
+     */
+    public static float dispatchHasteMultiplier(Char c) {
+        if (c == null) return 1f;
+        float sum = 0f;
+        for (Buff b : c.buffs()) {
+            if (b instanceof LuaBuff) sum += ((LuaBuff) b).hasteLevel(c.id());
+        }
+        return (float) Math.min(4.0, Math.max(0.25, Math.pow(1.1, sum)));
+    }
+
+    /** M10c: this buff's stealthBonus increment (NYRDS: summed onto Char.stealth). */
+    private float stealthBonus(int selfId) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return 0f;
+        return LuaItemCallbacks.callOptFloat(tbl, "stealthBonus", 0f,
+                LuaValue.valueOf(selfId), state);
+    }
+
+    /** Sum every attached LuaBuff's {@code stealthBonus}. Null-safe. */
+    public static float dispatchStealthBonus(Char c) {
+        if (c == null) return 0f;
+        float sum = 0f;
+        for (Buff b : c.buffs()) {
+            if (b instanceof LuaBuff) sum += ((LuaBuff) b).stealthBonus(c.id());
+        }
+        return sum;
+    }
+
+    /**
+     * M10c: this buff's {@code damage} amendment (NYRDS {@code charGotDamage} —
+     * return-consuming, composed in attach order). {@code srcId} is the source
+     * Char id, or -1 when the source is not a Char (hunger, falling, etc.) —
+     * passed to Lua as nil. Fail-open: missing fn / error / non-int → passthrough.
+     */
+    private int damage(int selfId, int srcId, int dmg) {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return dmg;
+        LuaValue srcArg = srcId >= 0 ? LuaValue.valueOf(srcId) : LuaValue.NIL;
+        return LuaItemCallbacks.callOptInt(tbl, "damage", dmg,
+                LuaValue.valueOf(selfId), srcArg, LuaValue.valueOf(dmg));
+    }
+
+    /**
+     * Compose every attached LuaBuff's {@code damage} amendment onto {@code dmg}
+     * in attach order. Dispatched from {@link Char#damage} pre-shield/pre-HP
+     * (post-resistance) — the NYRDS {@code charGotDamage} site.
+     */
+    public static int dispatchDamage(Char self, int dmg, Object src) {
+        if (self == null) return dmg;
+        int srcId = (src instanceof Char) ? ((Char) src).id() : -1;
+        for (Buff b : self.buffs()) {
+            if (b instanceof LuaBuff) {
+                dmg = ((LuaBuff) b).damage(self.id(), srcId, dmg);
+            }
+        }
+        return dmg;
+    }
+
     /**
      * Resolve the Lua {@code tintChar} callback to a {@link TintSpec}; {@code null}
      * if absent/nil/unparseable. Pure (no sprite access) so it is headless-
@@ -454,6 +574,11 @@ public class LuaBuff extends Buff {
     TintSpec computeTint() {
         LuaTable tbl = luaTable();
         if (tbl == null) return null;
+        // M10c: setGlowing takes precedence over tintChar — it is the Remished-named
+        // declarative glow field (number color | {color=, rays=}) and reuses this same
+        // aura path, so a script can use either name interchangeably.
+        TintSpec glowing = readGlowingSpec(tbl);
+        if (glowing != null) return glowing;
         LuaValue fn = tbl.get("tintChar");
         if (!fn.isfunction()) return null;
         LuaValue res;
@@ -487,6 +612,64 @@ public class LuaBuff extends Buff {
         return null;
     }
 
+    /**
+     * M10c: resolve the Remished {@code setGlowing} field (literal or
+     * {@code function(state)}) to an aura {@link TintSpec}; {@code null} if
+     * absent/nil/unparseable. Pure so it is headless-testable like computeTint.
+     */
+    private TintSpec readGlowingSpec(LuaTable tbl) {
+        LuaValue field = tbl.get("setGlowing");
+        if (field.isnil()) return null;
+        LuaValue res = field;
+        if (field.isfunction()) {
+            try {
+                res = field.call(LuaValue.valueOf(id()), state);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "setGlowing callback threw", e);
+                return null;
+            }
+        }
+        if (res == null || res.isnil()) return null;
+        if (res.isnumber()) return TintSpec.aura(res.toint(), DEFAULT_AURA_RAYS);
+        if (res.istable()) {
+            LuaValue color = res.get("color");
+            if (color.isnumber()) {
+                int rays = res.get("rays").optint(DEFAULT_AURA_RAYS);
+                return TintSpec.aura(color.toint(), rays);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * M10c: resolve the Remished {@code charSpriteStatus} field (literal or
+     * {@code function(state)}) to a {@link CharSprite.State}; {@code null} if
+     * absent/nil/unrecognised. Visual only — gameplay invisibility/stealth comes
+     * from {@code stealthBonus}, this only drives the sprite's visual state.
+     */
+    CharSprite.State computeSpriteState() {
+        LuaTable tbl = luaTable();
+        if (tbl == null) return null;
+        LuaValue field = tbl.get("charSpriteStatus");
+        if (field.isnil()) return null;
+        LuaValue res = field;
+        if (field.isfunction()) {
+            try {
+                res = field.call(LuaValue.valueOf(id()), state);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "charSpriteStatus callback threw", e);
+                return null;
+            }
+        }
+        if (res == null || !res.isstring()) return null;
+        try {
+            return CharSprite.State.valueOf(res.tojstring());
+        } catch (IllegalArgumentException e) {
+            Gdx.app.error(TAG, "charSpriteStatus unknown state: " + res.tojstring());
+            return null;
+        }
+    }
+
     @Override
     public void fx(boolean on) {
         if (target == null || target.sprite == null) return;
@@ -495,20 +678,30 @@ public class LuaBuff extends Buff {
             // change (aura↔tint↔nil) or an updateSpriteState re-fire leaves no
             // residue; then apply the fresh spec (nil → only cleared).
             clearAppliedTint();
+            clearAppliedState();
             TintSpec spec = computeTint();
             if (spec == null) {
                 appliedTint = TINT_NONE;
-                return;
-            }
-            if (spec.aura) {
+            } else if (spec.aura) {
                 target.sprite.aura(spec.color, spec.rays);
                 appliedTint = TINT_AURA;
             } else {
                 target.sprite.tint(spec.r, spec.g, spec.b, spec.a);
                 appliedTint = TINT_TINT;
             }
+            // M10c: charSpriteStatus — add the visual State (e.g. INVISIBLE) on
+            // top of the tint. Applied even when there is no tint spec (Cloak
+            // uses charSpriteStatus alone). Re-fires self-clear via appliedState.
+            CharSprite.State st = computeSpriteState();
+            if (st != null) {
+                target.sprite.add(st);
+                appliedState = st;
+            } else {
+                appliedState = null;
+            }
         } else {
             clearAppliedTint();
+            clearAppliedState();
         }
     }
 
@@ -516,6 +709,11 @@ public class LuaBuff extends Buff {
         if (appliedTint == TINT_AURA) target.sprite.clearAura();
         else if (appliedTint == TINT_TINT) target.sprite.resetColor();
         appliedTint = TINT_NONE;
+    }
+
+    private void clearAppliedState() {
+        if (appliedState != null) target.sprite.remove(appliedState);
+        appliedState = null;
     }
 
     @Override

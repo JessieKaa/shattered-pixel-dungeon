@@ -1,12 +1,12 @@
--- M7a port of Remished scripts/buffs/ChampionOfEarth.lua
--- Remished: x4 HT + heal, drBonus, regenerationBonus. M7a bridges drBonus via
--- the new drRoll hook; attachTo heals the bearer once (one-shot, guarded by
--- state so a restore-replay would not re-heal). regenerationBonus (HP/tick) and
--- HT-scaling need hooks not in this feature set and stay deferred to M7b.
+-- M10c port of Remished scripts/buffs/ChampionOfEarth.lua
+-- Remished: x4 HT + heal, drBonus, regenerationBonus, setGlowing. M10c wires
+-- the canonical callbacks: drBonus bridges into drRoll (additive), regenera-
+-- tionBonus feeds Regeneration.act (healRate=1.2^sum), setGlowing drives the
+-- fx aura. attachTo keeps the one-shot heal (guarded by state).
 register_buff{
     id = "champion_of_earth",
     name = "ChampionOfEarth",
-    info = "ChampionOfEarth (M7a: one-shot heal + drRoll; regenBonus/HT-scale M7b)",
+    info = "ChampionOfEarth (M10c: drBonus + regenerationBonus + setGlowing)",
     icon = 0,
 
     attachTo = function(targetId, state)
@@ -17,7 +17,16 @@ register_buff{
         return true
     end,
 
-    drRoll = function(selfId, dr)
-        return dr + 5
+    drBonus = function(selfId)
+        return RPD.buffLevel(selfId, "champion_of_earth") or 1
+    end,
+
+    regenerationBonus = function(selfId)
+        return RPD.buffLevel(selfId, "champion_of_earth") or 1
+    end,
+
+    -- 0x55AA55 earth-green glow
+    setGlowing = function(selfId, state)
+        return { color = 5614165, rays = 6 }
     end,
 }
