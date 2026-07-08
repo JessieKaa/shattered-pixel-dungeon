@@ -1,0 +1,10 @@
+{
+  "id": "regression_demo",
+  "name": "M6-M11 回归演示包",
+  "version": "0.1.0",
+  "spd_version": 896,
+  "author": "fork",
+  "default_enabled": false,
+  "entry": "entry.lua",
+  "description": "M6-M11 Lua modding API 端到端回归基线(item/material/mob/buff/spell/talent/level/painter/trap + RPD API)。开启后一键压测全平台 API。"
+}
