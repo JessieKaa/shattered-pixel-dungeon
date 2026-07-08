@@ -35,6 +35,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Haste;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Invisibility;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Levitation;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Light;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.MagicalSleep;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Ooze;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Paralysis;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Poison;
@@ -199,6 +200,10 @@ final class RpdApi {
         rpd.set("randomBackpackItem", new RandomBackpackItem());
         rpd.set("itemName", new ItemName());
         rpd.set("removeBackpackItem", new RemoveBackpackItem());
+        // M11d: one-way curse for a backpack item at a 1-based index. Single narrow
+        // API (curse_item spell). Sets cursed+cursedKnown, returns true if newly
+        // cursed, false if already cursed (no-op), nil on bad args.
+        rpd.set("setItemCursed", new SetItemCursed());
         rpd.set("stealRandomItem", new StealRandomItem());
         rpd.set("stolenLootName", new StolenLootName());
         rpd.set("teleportChar", new TeleportChar());
@@ -1322,6 +1327,12 @@ final class RpdApi {
             });
             BUFF_CLASSES.put("Burning",
                     com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Burning.class);
+            // M11d: MagicalSleep is the real "hard sleep" control path (paralysed++
+            // + mob SLEEPING state), unlike the Sleep FlavourBuff which only swaps
+            // idle FX. It extends Buff (not FlavourBuff) and ignores the amount
+            // arg (attachTo self-manages STEP), so a dedicated entry is needed.
+            ENTRIES.put("MagicalSleep", (t, amt) -> Buff.affect(t, MagicalSleep.class));
+            BUFF_CLASSES.put("MagicalSleep", MagicalSleep.class);
         }
 
         private static <T extends FlavourBuff> void putFlavour(String name, Class<T> clazz) {
@@ -1468,6 +1479,38 @@ final class RpdApi {
                 return LuaValue.valueOf(true);
             } catch (Exception e) {
                 Gdx.app.error(TAG, "removeBackpackItem threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /**
+     * {@code RPD.setItemCursed(heroId, index)} — one-way curse the backpack item
+     * at a 1-based index (the value {@code randomBackpackItem} returns). Sets
+     * {@code cursed = cursedKnown = true}. Returns {@code true} if the flag
+     * flipped false→true, {@code false} if the item was already cursed (no-op),
+     * NIL on a bad hero id / non-int / out-of-range index. One-way by intent: a
+     * curse spell must not double as an uncursing bridge.
+     */
+    private static final class SetItemCursed extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue charId, LuaValue index) {
+            try {
+                Hero hero = resolveHero(charId, "setItemCursed");
+                if (hero == null) return NIL;
+                if (!index.isint()) {
+                    Gdx.app.error(TAG, "setItemCursed expected int index, got " + index.typename());
+                    return NIL;
+                }
+                java.util.List<Item> items = hero.belongings.backpack.items;
+                int i = index.toint() - 1;
+                if (i < 0 || i >= items.size()) return NIL;
+                Item item = items.get(i);
+                if (item.cursed) return LuaValue.FALSE;
+                item.cursed = true;
+                item.cursedKnown = true;
+                return LuaValue.TRUE;
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "setItemCursed threw", e);
                 return NIL;
             }
         }

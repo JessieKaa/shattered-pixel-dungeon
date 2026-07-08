@@ -387,6 +387,31 @@ public class LuaSpellTest {
 	}
 
 	@Test
+	public void m11dStubSpellsHaveCostsAndNoDegradeText() {
+		LuaEngine.init();
+		// M11d: curse_item/order/possess are no longer zero-cost stubs.
+		LuaSpell curse = LuaSpellRegistry.create("curse_item");
+		LuaSpell order = LuaSpellRegistry.create("order");
+		LuaSpell possess = LuaSpellRegistry.create("possess");
+		assertNotNull(curse);
+		assertNotNull(order);
+		assertNotNull(possess);
+		assertEquals("curse_item costs 5 mana", 5, curse.spellCost());
+		assertEquals("order costs 8 mana", 8, order.spellCost());
+		assertEquals("possess costs 10 mana", 10, possess.spellCost());
+		assertEquals("mana", curse.useMode());
+		assertEquals("mana", order.useMode());
+		assertEquals("mana", possess.useMode());
+		assertEquals("self", curse.targeting());
+		assertEquals("enemy", order.targeting());
+		assertEquals("enemy", possess.targeting());
+		assertFalse("curse_item desc must not say 降级", curse.desc().contains("降级"));
+		assertFalse("curse_item desc must not say 零消耗", curse.desc().contains("零消耗"));
+		assertFalse("order desc must not say 降级", order.desc().contains("降级"));
+		assertFalse("possess desc must not say 无效", possess.desc().contains("无效"));
+	}
+
+	@Test
 	public void migratedSpellsHaveCorrectTargeting() {
 		LuaEngine.init();
 		assertEquals("cell", LuaSpellRegistry.create("lightning_bolt").targeting());

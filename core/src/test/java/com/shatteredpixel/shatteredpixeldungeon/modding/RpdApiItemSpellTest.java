@@ -6,6 +6,7 @@ import com.badlogic.gdx.backends.headless.HeadlessApplicationConfiguration;
 import com.badlogic.gdx.utils.JsonReader;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.MagicalSleep;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.watabou.noosa.Game;
@@ -263,6 +264,89 @@ public class RpdApiItemSpellTest {
         ).call();
         assertFalse("luajava.bindClass must still fail with M6d API present", ok.toboolean());
         assertTrue("luajava global itself must remain stripped", g.get("luajava").isnil());
+    }
+
+    // ---- M11d: setItemCursed one-way curse API ----
+
+    @Test
+    public void setItemCursedIsOneWayCurse() {
+        Globals g = globals();
+        Hero hero = newHero();
+        Dungeon.hero = hero;
+        try {
+            Item weapon = new com.shatteredpixel.shatteredpixeldungeon.items.weapon.melee.Shortsword();
+            assertFalse("fresh weapon is uncursed", weapon.cursed);
+            hero.belongings.backpack.items.add(weapon);
+
+            LuaValue r1 = g.load("return RPD.setItemCursed(" + hero.id() + ", 1)").call();
+            assertTrue("first curse returns true (false→true)", r1.isboolean() && r1.toboolean());
+            assertTrue("cursed flag flipped", weapon.cursed);
+            assertTrue("cursedKnown set so the curse is visible", weapon.cursedKnown);
+
+            // One-way: a second call is a no-op, not an uncursing bridge.
+            LuaValue r2 = g.load("return RPD.setItemCursed(" + hero.id() + ", 1)").call();
+            assertTrue("already-cursed returns boolean false (no-op)", r2.isboolean());
+            assertFalse("already-cursed returns false value", r2.toboolean());
+            assertTrue("still cursed after the no-op second call", weapon.cursed);
+
+            // Out-of-range index → nil (bad args), distinct from the false no-op.
+            assertTrue("out-of-range index → nil",
+                    g.load("return RPD.setItemCursed(" + hero.id() + ", 99999)").call().isnil());
+            assertTrue("non-int index → nil",
+                    g.load("return RPD.setItemCursed(" + hero.id() + ", 'x')").call().isnil());
+        } finally {
+            Dungeon.hero = null;
+        }
+    }
+
+    @Test
+    public void curseItemOnUseCursesViaLua() {
+        // Integration: drive the registered curse_item spell's onUse the same way
+        // LuaSpell.execute does, and confirm the Lua→RPD wiring actually curses a
+        // backpack item (not just that the Java API flips a flag).
+        Globals g = globals();
+        Hero hero = newHero();
+        Dungeon.hero = hero;
+        try {
+            Item weapon = new com.shatteredpixel.shatteredpixeldungeon.items.weapon.melee.Shortsword();
+            hero.belongings.backpack.items.add(weapon);
+
+            LuaTable tbl = LuaSpellRegistry.getTable("curse_item");
+            assertNotNull("curse_item spell registered", tbl);
+            LuaItemCallbacks.callOpt(tbl, "onUse", LuaValue.valueOf(hero.id()));
+
+            assertTrue("onUse cursed the single backpack item via the Lua→RPD wiring",
+                    weapon.cursed);
+        } finally {
+            Dungeon.hero = null;
+        }
+    }
+
+    @Test
+    public void magicalSleepAndTerrorInWhitelist() {
+        assertNotNull("MagicalSleep resolvable in BuffWhitelist", RpdApi.BuffWhitelist.lookupClass("MagicalSleep"));
+        assertNotNull("Terror resolvable in BuffWhitelist", RpdApi.BuffWhitelist.lookupClass("Terror"));
+
+        Globals g = globals();
+        Hero hero = newHero();
+        Dungeon.hero = hero;
+        try {
+            LuaMobRegistry.clear();
+            LuaMobRegistry.register("possess_test_mob", baseMobTable("possess_test_mob"));
+            LuaMob mob = LuaMobRegistry.create("possess_test_mob");
+            Actor.add(mob);
+            try {
+                int paralysedBefore = mob.paralysed;
+                g.load("RPD.affectBuff(" + mob.id() + ", 'MagicalSleep', 1)").call();
+                assertNotNull("MagicalSleep applied via whitelist", mob.buff(MagicalSleep.class));
+                assertTrue("MagicalSleep is hard control (paralysed incremented)",
+                        mob.paralysed > paralysedBefore);
+            } finally {
+                Actor.remove(mob);
+            }
+        } finally {
+            Dungeon.hero = null;
+        }
     }
 
     // ---- helpers ----
