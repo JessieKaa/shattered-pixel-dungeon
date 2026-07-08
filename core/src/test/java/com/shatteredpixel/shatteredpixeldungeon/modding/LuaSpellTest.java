@@ -108,7 +108,24 @@ public class LuaSpellTest {
 		for (String id : ids) {
 			assertTrue("M6d representative spell should register: " + id, LuaSpellRegistry.contains(id));
 		}
-		assertEquals("test_spell + 8 M6d representative spells", 9, LuaSpellRegistry.size());
+		assertEquals("test_spell + 8 M6d + 22 M10a spells", 31, LuaSpellRegistry.size());
+	}
+
+	@Test
+	public void m10aSpellsRegisteredByEngineInit() {
+		LuaEngine.init();
+		// M10a: 22 register_spell ports (21 real remished spells + remished_test_spell).
+		// custom_spells_list / spells_by_affinity are data stubs and intentionally do NOT register.
+		String[] ids = {
+			"anesthesia", "backstab", "blood_transfusion", "body_armor", "calm",
+			"cloak", "corpse_explosion", "curse_item", "dark_sacrifice", "dash",
+			"die_hard", "exhumation", "hide_in_grass", "kunai_throw", "magic_arrow",
+			"nature_armor", "order", "possess", "roar", "shoot_in_eye", "smash",
+			"remished_test_spell"
+		};
+		for (String id : ids) {
+			assertTrue("M10a spell should register: " + id, LuaSpellRegistry.contains(id));
+		}
 	}
 
 	@Test
