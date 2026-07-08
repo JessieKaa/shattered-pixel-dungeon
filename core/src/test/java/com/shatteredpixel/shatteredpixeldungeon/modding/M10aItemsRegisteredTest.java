@@ -9,8 +9,10 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -128,5 +130,70 @@ public class M10aItemsRegisteredTest {
         assertTrue("mask onEquip must be a function", mask.get("onEquip").isfunction());
         assertTrue("mask onDeactivate must be a function",
                 mask.get("onDeactivate").isfunction());
+    }
+
+    @Test
+    public void shieldItemEquipCallbacksPresentAndDegradedFieldsRemoved() {
+        // M11a: shields drive behavior through item onEquip -> permanent buff guards.
+        LuaEngine.init();
+
+        for (String id : new String[]{"wooden_shield", "tough_shield", "strong_shield",
+                "royal_shield", "chaos_shield"}) {
+            org.luaj.vm2.LuaTable t = LuaItemRegistry.getTable(id);
+            assertNotNull(id + " should be registered", t);
+            assertTrue(id + " onEquip must be a function", t.get("onEquip").isfunction());
+            assertTrue(id + " onDeactivate must be a function", t.get("onDeactivate").isfunction());
+            assertFalse(id + " item drBonus should be removed (now in guard buff)",
+                    t.get("drBonus").isfunction());
+        }
+
+        org.luaj.vm2.LuaTable chaos = LuaItemRegistry.getTable("chaos_shield");
+        assertFalse("chaos_shield ownerDoesDamage should be removed (now in guard buff)",
+                chaos.get("ownerDoesDamage").isfunction());
+        assertFalse("chaos_shield ownerTakesDamage should be removed (now in guard buff)",
+                chaos.get("ownerTakesDamage").isfunction());
+    }
+
+    @Test
+    public void shieldItemCallbacksAttachAndDetachGuardBuffs() throws Exception {
+        // M11a glue test: directly invoke the Lua item callbacks (like LuaItem.activate would)
+        // and assert the corresponding guard buff is attached/removed.
+        LuaEngine.init();
+
+        com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero hero =
+                new com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero();
+        hero.HT = 50; hero.HP = 50;
+        hero.pos = 0;
+        com.shatteredpixel.shatteredpixeldungeon.actors.Actor.add(hero);
+        try {
+            String[][] pairs = {
+                    {"wooden_shield", "wooden_shield_guard"},
+                    {"tough_shield", "tough_shield_guard"},
+                    {"strong_shield", "strong_shield_guard"},
+                    {"royal_shield", "royal_shield_guard"},
+                    {"chaos_shield", "chaos_shield_guard"},
+            };
+            for (String[] pair : pairs) {
+                String itemId = pair[0];
+                String guardId = pair[1];
+                org.luaj.vm2.LuaTable item = LuaItemRegistry.getTable(itemId);
+                assertNotNull(item);
+
+                LuaItemCallbacks.callOpt(item, "onEquip", LuaItemCallbacks.arg(hero.id()));
+                assertNotNull(itemId + " onEquip should attach " + guardId, findGuard(hero, guardId));
+
+                LuaItemCallbacks.callOpt(item, "onDeactivate", LuaItemCallbacks.arg(hero.id()));
+                assertNull(itemId + " onDeactivate should detach " + guardId, findGuard(hero, guardId));
+            }
+        } finally {
+            com.shatteredpixel.shatteredpixeldungeon.actors.Actor.remove(hero);
+        }
+    }
+
+    private static LuaBuff findGuard(com.shatteredpixel.shatteredpixeldungeon.actors.Char c, String id) {
+        for (com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff b : c.buffs(LuaBuff.class)) {
+            if (((LuaBuff) b).sameLuaId(id)) return (LuaBuff) b;
+        }
+        return null;
     }
 }

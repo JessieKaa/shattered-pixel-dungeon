@@ -470,7 +470,7 @@ public class LuaBuffCallbackTest {
     // ---- test_mod scripts use canonical callbacks ----
 
     @Test
-    public void nineScriptsExposeCanonicalCallbacks() {
+    public void upgradedScriptsExposeCanonicalCallbacks() {
         LuaEngine.init();
         // Champion of Air: hasteLevel + setGlowing
         LuaTable air = LuaBuffRegistry.getTable("champion_of_air");
@@ -513,9 +513,34 @@ public class LuaBuffCallbackTest {
         assertTrue("body_armor.drBonus", armor.get("drBonus").isfunction());
         assertTrue("body_armor.speedMultiplier", armor.get("speedMultiplier").isfunction());
 
+        // M11a shield guards: wooden (drBonus), tough/strong/royal (drBonus+speedMultiplier), chaos (all hooks)
+        LuaTable woodenGuard = LuaBuffRegistry.getTable("wooden_shield_guard");
+        assertNotNull("wooden_shield_guard loaded", woodenGuard);
+        assertTrue("wooden_shield_guard.drBonus", woodenGuard.get("drBonus").isfunction());
+
+        LuaTable toughGuard = LuaBuffRegistry.getTable("tough_shield_guard");
+        assertTrue("tough_shield_guard.drBonus", toughGuard.get("drBonus").isfunction());
+        assertTrue("tough_shield_guard.speedMultiplier", toughGuard.get("speedMultiplier").isfunction());
+
+        LuaTable strongGuard = LuaBuffRegistry.getTable("strong_shield_guard");
+        assertTrue("strong_shield_guard.drBonus", strongGuard.get("drBonus").isfunction());
+        assertTrue("strong_shield_guard.speedMultiplier", strongGuard.get("speedMultiplier").isfunction());
+
+        LuaTable royalGuard = LuaBuffRegistry.getTable("royal_shield_guard");
+        assertTrue("royal_shield_guard.drBonus", royalGuard.get("drBonus").isfunction());
+        assertTrue("royal_shield_guard.speedMultiplier", royalGuard.get("speedMultiplier").isfunction());
+
+        LuaTable chaosGuard = LuaBuffRegistry.getTable("chaos_shield_guard");
+        assertTrue("chaos_shield_guard.drBonus", chaosGuard.get("drBonus").isfunction());
+        assertTrue("chaos_shield_guard.attackProc", chaosGuard.get("attackProc").isfunction());
+        assertTrue("chaos_shield_guard.damage", chaosGuard.get("damage").isfunction());
+        assertTrue("chaos_shield_guard.setGlowing", chaosGuard.get("setGlowing").isfunction());
+
         // None of the upgraded scripts carry a `degraded` marker.
         for (String id : new String[]{"champion_of_air", "champion_of_earth", "champion_of_fire",
-                "champion_of_water", "die_hard", "cloak", "body_armor"}) {
+                "champion_of_water", "die_hard", "cloak", "body_armor",
+                "wooden_shield_guard", "tough_shield_guard", "strong_shield_guard",
+                "royal_shield_guard", "chaos_shield_guard"}) {
             assertFalse(id + " not degraded", LuaBuffRegistry.getTable(id).get("degraded").isboolean());
         }
     }

@@ -1,17 +1,25 @@
--- M10a shield item: Remished ToughShield(坚韧盾)。走 LuaItem(weapon 占位 wrapper)。见 wooden_shield.lua 头注。
--- 降级(M10c):drBonus/格挡/left_hand 槽 待 M10c 桥接。
--- 原件: ../remished-dungeon/scripts/items/ToughShield.lua
+-- M11a: Remished ToughShield(坚韧盾)。走 LuaItem(weapon 占位 wrapper)。
+local SHIELD_LEVEL = 2
+local GUARD_BUFF = "tough_shield_guard"
+
 register_item {
     id = "tough_shield",
     name = "坚韧盾",
-    desc = "一面加固过的盾牌。原版可左手装备并格挡伤害(降级:drBonus/格挡/left_hand 槽 待 M10c)。",
+    desc = "一面加固过的盾牌。装备时提供 2 点额外护甲,但轻微减速(无左手槽,占用武器槽)。",
     image = 61,
     tier = 2,
     price = 80,
-    shieldLevel = 2,
+    shieldLevel = SHIELD_LEVEL,
 
-    -- DEGRADED: needs M10c. Inert until wired.
-    drBonus = function(heroId)
-        return 2
+    onEquip = function(heroId)
+        if RPD and RPD.permanentBuff then
+            RPD.permanentBuff(heroId, GUARD_BUFF, SHIELD_LEVEL)
+        end
+    end,
+
+    onDeactivate = function(heroId)
+        if RPD and RPD.removeBuff then
+            RPD.removeBuff(heroId, GUARD_BUFF)
+        end
     end,
 }
