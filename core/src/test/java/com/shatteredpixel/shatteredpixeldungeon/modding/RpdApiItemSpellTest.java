@@ -253,6 +253,163 @@ public class RpdApiItemSpellTest {
         assertTrue("non-int cell → nil", g.load("return RPD.spawnMobNear('test_mob', 'x')").call().isnil());
     }
 
+    // ---- M11c terrain/dig/dropItem API ----
+
+    @Test
+    public void terrainApiNilWhenLevelNull() {
+        Globals g = globals();
+        assertTrue("terrain guards null level", g.load("return RPD.terrain(0)").call().isnil());
+        assertTrue("setTerrain guards null level", g.load("return RPD.setTerrain(0, 1)").call().isnil());
+        assertTrue("isWall guards null level", g.load("return RPD.isWall(0)").call().isnil());
+        assertTrue("isSolid guards null level", g.load("return RPD.isSolid(0)").call().isnil());
+        assertTrue("dig guards null level", g.load("return RPD.dig(0)").call().isnil());
+        assertTrue("dropItem guards null level", g.load("return RPD.dropItem(0, 'dark_gold', 1)").call().isnil());
+    }
+
+    @Test
+    public void terrainReadAndFlags() {
+        Globals g = globals();
+        Dungeon.level = buildTestLevel();
+        try {
+            // use an interior wall cell (not the outermost border)
+            int wallCell = 16 + 1; // x=1,y=1 => still wall because y==1? No, y=1 not border. Let's use x=1,y=0? y=0 is border excluded.
+            // Actually border cells are excluded by insideMap. Use a wall cell just inside: x=1,y=1 is floor. x=1,y=14 is floor.
+            // DataDrivenLevel may not create interior walls. Place a wall manually at an interior cell.
+            int interiorCell = 16 + 2; // x=2,y=1 (y=1 is second row, not border)
+            Dungeon.level.map[interiorCell] = com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.WALL;
+            Dungeon.level.updateCellFlags(interiorCell);
+
+            LuaValue t = g.load("return RPD.terrain(" + interiorCell + ")").call();
+            assertTrue("terrain returns int, got " + t.typename(), t.isint());
+            assertEquals("interior wall terrain", com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.WALL, t.toint());
+            assertTrue("wall cell is solid", g.load("return RPD.isSolid(" + interiorCell + ")").call().toboolean());
+            assertTrue("wall cell is wall", g.load("return RPD.isWall(" + interiorCell + ")").call().toboolean());
+
+            // cell 17 is floor/entrance
+            assertFalse("floor is not solid", g.load("return RPD.isSolid(17)").call().toboolean());
+            assertFalse("floor is not wall", g.load("return RPD.isWall(17)").call().toboolean());
+        } finally {
+            Dungeon.level = null;
+        }
+    }
+
+    @Test
+    public void setTerrainChangesTile() {
+        Globals g = globals();
+        Dungeon.level = buildTestLevel();
+        try {
+            // cell 18 is an interior floor (EMPTY) — a whitelisted source; cell 17
+            // is ENTRANCE and is reserved for the protected-source test below.
+            int floorCell = 18;
+            assertEquals(com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.EMPTY, Dungeon.level.map[floorCell]);
+            LuaValue ok = g.load("return RPD.setTerrain(" + floorCell + ", "
+                    + com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.EMBERS + ")").call();
+            assertTrue(ok.isboolean() && ok.toboolean());
+            assertEquals(com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.EMBERS, Dungeon.level.map[floorCell]);
+            assertFalse(Dungeon.level.solid[floorCell]);
+        } finally {
+            Dungeon.level = null;
+        }
+    }
+
+    @Test
+    public void setTerrainRejectsProtectedAndBadTarget() {
+        Globals g = globals();
+        Dungeon.level = buildTestLevel();
+        try {
+            int entrance = com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.ENTRANCE;
+            int embers = com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.EMBERS;
+            int empty = com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.EMPTY;
+            int wall = com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.WALL;
+
+            // cell 17 is ENTRANCE — a protected source. Repainting it to a safe
+            // target must be rejected so a script cannot erase transitions/exits.
+            LuaValue onEntrance = g.load("return RPD.setTerrain(17, " + embers + ")").call();
+            assertFalse("entrance is a protected source", onEntrance.isboolean() && onEntrance.toboolean());
+            assertEquals("entrance unchanged", entrance, Dungeon.level.map[17]);
+
+            // a wall source is also protected (structural).
+            int wallCell = 16 + 2;
+            Dungeon.level.map[wallCell] = wall;
+            Dungeon.level.updateCellFlags(wallCell);
+            LuaValue onWall = g.load("return RPD.setTerrain(" + wallCell + ", " + empty + ")").call();
+            assertFalse("wall is a protected source", onWall.isboolean() && onWall.toboolean());
+            assertEquals("wall unchanged", wall, Dungeon.level.map[wallCell]);
+
+            // non-whitelisted target on a safe source is rejected too.
+            LuaValue badTarget = g.load("return RPD.setTerrain(18, " + wall + ")").call();
+            assertFalse("wall is not a whitelisted target", badTarget.isboolean() && badTarget.toboolean());
+        } finally {
+            Dungeon.level = null;
+        }
+    }
+
+    @Test
+    public void levelWidthReturnsActualWidth() {
+        Globals g = globals();
+        assertTrue("levelWidth guards null level", g.load("return RPD.levelWidth()").call().isnil());
+        Dungeon.level = buildTestLevel();
+        try {
+            LuaValue w = g.load("return RPD.levelWidth()").call();
+            assertTrue("levelWidth returns int", w.isint());
+            assertEquals(16, w.toint());
+            assertFalse("not userdata", w.isuserdata());
+        } finally {
+            Dungeon.level = null;
+        }
+    }
+
+    @Test
+    public void digOnlyAffectsWhitelist() {
+        Globals g = globals();
+        Dungeon.level = buildTestLevel();
+        try {
+            int interiorWall = 16 + 2;
+            Dungeon.level.map[interiorWall] = com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.WALL;
+            Dungeon.level.updateCellFlags(interiorWall);
+
+            LuaValue wall = g.load("return RPD.dig(" + interiorWall + ")").call();
+            assertTrue("dig wall → true", wall.isboolean() && wall.toboolean());
+            assertEquals(com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.EMPTY, Dungeon.level.map[interiorWall]);
+
+            LuaValue floor = g.load("return RPD.dig(17)").call();
+            assertTrue("dig floor → false (non-diggable)", floor.isboolean() && !floor.toboolean());
+            assertEquals(com.shatteredpixel.shatteredpixeldungeon.levels.Terrain.ENTRANCE, Dungeon.level.map[17]);
+        } finally {
+            Dungeon.level = null;
+        }
+    }
+
+    @Test
+    public void dropItemCreatesHeapOnFloor() {
+        Globals g = globals();
+        Dungeon.level = buildTestLevel();
+        try {
+            LuaValue ok = g.load("return RPD.dropItem(17, 'rotten_organ', 3)").call();
+            assertTrue(ok.isboolean() && ok.toboolean());
+            com.shatteredpixel.shatteredpixeldungeon.items.Heap heap = Dungeon.level.heaps.get(17);
+            assertNotNull(heap);
+            assertEquals("heap.pos must match the drop cell (else save/load misplaces it)", 17, heap.pos);
+            assertEquals("腐烂器官", heap.peek().name());
+            assertEquals(3, heap.peek().quantity());
+        } finally {
+            Dungeon.level = null;
+        }
+    }
+
+    @Test
+    public void dropItemRejectsBadInput() {
+        Globals g = globals();
+        Dungeon.level = buildTestLevel();
+        try {
+            assertTrue("unknown item → nil", g.load("return RPD.dropItem(17, 'nope', 1)").call().isnil());
+            assertTrue("bad qty → nil", g.load("return RPD.dropItem(17, 'rotten_organ', 0)").call().isnil());
+            assertTrue("non-string item → nil", g.load("return RPD.dropItem(17, 5, 1)").call().isnil());
+        } finally {
+            Dungeon.level = null;
+        }
+    }
+
     // ---- M1 sandbox regression ----
 
     @Test
