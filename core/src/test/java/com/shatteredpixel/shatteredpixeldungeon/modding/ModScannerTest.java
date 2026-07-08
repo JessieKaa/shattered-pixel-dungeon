@@ -255,6 +255,62 @@ public class ModScannerTest {
 		}
 	}
 
+	// ---------------- M12a external scan + merge ----------------
+
+	@Test
+	public void scanExternal_setsExternalOriginAndBaseDir() throws IOException {
+		File externalDir = tmp.newFolder("mods_user");
+		buildMod(externalDir, "ext_mod", manifest("ext_mod", TEST_VERSION_CODE, false));
+		List<ModManifest> mods = ModScanner.scanExternal(new FileHandle(externalDir));
+
+		assertEquals(ids(mods), Set.of("ext_mod"));
+		ModManifest m = mods.get(0);
+		assertEquals("external mod must carry EXTERNAL origin", ModManifest.Origin.EXTERNAL, m.origin);
+		assertNotNull("external mod must have a baseDir", m.baseDir);
+		assertTrue("baseDir must point at the mod's own directory, got " + m.baseDir.path(),
+				m.baseDir.path().endsWith("ext_mod"));
+	}
+
+	@Test
+	public void scanExternal_missingDir_returnsEmpty() {
+		File missing = new File(tmp.getRoot(), "does_not_exist");
+		assertTrue("a non-existent mods_user/ must yield zero external mods (no crash)",
+				ModScanner.scanExternal(new FileHandle(missing)).isEmpty());
+		assertEquals("null external root is also tolerated", 0, ModScanner.scanExternal(null).size());
+	}
+
+	@Test
+	public void merge_builtinShadowsExternalById() throws IOException {
+		// Builtin "shared" + external "shared" (collision) and "ext_only" (distinct).
+		File builtinDir = newModsDir();
+		buildMod(builtinDir, "shared", manifest("shared", TEST_VERSION_CODE, false));
+		File externalDir = tmp.newFolder("mods_user");
+		buildMod(externalDir, "shared", manifest("shared", TEST_VERSION_CODE, false));
+		buildMod(externalDir, "ext_only", manifest("ext_only", TEST_VERSION_CODE, false));
+
+		List<ModManifest> builtin = ModScanner.scanDir(new FileHandle(builtinDir));
+		List<ModManifest> external = ModScanner.scanExternal(new FileHandle(externalDir));
+		List<ModManifest> merged = ModScanner.mergeById(builtin, external);
+
+		assertEquals("both ids present after merge", Set.of("shared", "ext_only"), ids(merged));
+		ModManifest shared = byId(merged, "shared");
+		assertEquals("builtin must win id collision", ModManifest.Origin.BUILTIN, shared.origin);
+		assertEquals("distinct external mod kept as EXTERNAL",
+				ModManifest.Origin.EXTERNAL, byId(merged, "ext_only").origin);
+	}
+
+	@Test
+	public void scanDir_setsBuiltinOriginAndBaseDir() throws IOException {
+		// Builtin test seam must still annotate BUILTIN + baseDir (regression guard for the
+		// Origin-param refactor of scanChildren).
+		File modsDir = newModsDir();
+		buildMod(modsDir, "b_mod", manifest("b_mod", TEST_VERSION_CODE, false));
+		ModManifest m = ModScanner.scanDir(new FileHandle(modsDir)).get(0);
+		assertEquals(ModManifest.Origin.BUILTIN, m.origin);
+		assertNotNull(m.baseDir);
+		assertTrue(m.baseDir.path().endsWith("b_mod"));
+	}
+
 	// ---------------- ModRegistry round-trip ----------------
 
 	@Test
@@ -321,6 +377,11 @@ public class ModScannerTest {
 		Set<String> out = new TreeSet<>();
 		for (ModManifest m : mods) out.add(m.id);
 		return out;
+	}
+
+	private static ModManifest byId(List<ModManifest> mods, String id) {
+		for (ModManifest m : mods) if (m.id.equals(id)) return m;
+		throw new AssertionError("no mod with id " + id + " in " + ids(mods));
 	}
 
 	/**
