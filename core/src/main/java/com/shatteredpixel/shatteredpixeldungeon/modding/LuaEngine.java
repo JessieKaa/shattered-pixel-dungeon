@@ -142,6 +142,13 @@ public class LuaEngine implements ResourceFinder {
 			// are forwarded to LuaTalentOverride so Talent.maxPoints()/desc()/title() reuse
 			// the M7e fallback. LuaTalentRegistry owns the tier injection.
 			globals.set("register_talent", new RegisterTalentFunction());
+			// M10b: register_painter / register_trap globals. Painters are keyed by
+			// Room class simple name and overlaid by LuaPainterAdapter after the
+			// upstream RegularPainter pipeline; traps are placed by
+			// LuaLevelService.injectLevelTraps. Both store the table as-is so the
+			// adapter/LuaTrap can re-read callbacks each use.
+			globals.set("register_painter", new RegisterPainterFunction());
+			globals.set("register_trap", new RegisterTrapFunction());
 			// M2: inject the narrow RPD.* surface (affectBuff/damageChar/GLog/...).
 			// Lua never gets a Char object — only int ids resolved via Actor.findById.
 			globals.set("RPD", RpdApi.build());
@@ -165,6 +172,9 @@ public class LuaEngine implements ResourceFinder {
 			loadShopScripts();
 			loadBuffScripts();
 			loadTalentScripts();
+			// M10b: painter + trap scripts (mods/<id>/scripts/painters|traps).
+			loadPainterScripts();
+			loadTrapScripts();
 
 			// M5b: load each enabled mod's entry script (Remixed-style init.lua that calls
 			// register_*). ModRegistry.all() lazy-scans on first use (production: triggers scan here;
@@ -303,6 +313,32 @@ public class LuaEngine implements ResourceFinder {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
 			loadScriptsFrom("mods/" + mod.id + "/scripts/talents", "Lua talent overrides (" + mod.id + ")", LuaTalentOverride::size);
+		}
+	}
+
+	/**
+	 * M10b: enumerate {@code mods/<id>/scripts/painters/*.lua} for each enabled mod
+	 * and compile each. Painters are keyed by Room class simple name and overlaid
+	 * by {@link LuaPainterAdapter} after the upstream paint pipeline. A disabled
+	 * mod contributes zero painters (C3 baseline — vanilla playthrough loads none,
+	 * so {@link LuaPainterRegistry#hasAny()} is false and build() skips the wrap).
+	 */
+	private void loadPainterScripts() {
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/painters", "Lua painters (" + mod.id + ")", LuaPainterRegistry::size);
+		}
+	}
+
+	/**
+	 * M10b: enumerate {@code mods/<id>/scripts/traps/*.lua} for each enabled mod
+	 * and compile each. Lua traps are not part of the vanilla trap pool — they
+	 * enter a level only via {@link LuaLevelService#injectLevelTraps}.
+	 */
+	private void loadTrapScripts() {
+		for (ModManifest mod : ModRegistry.all()) {
+			if (!ModRegistry.isEnabled(mod.id)) continue;
+			loadScriptsFrom("mods/" + mod.id + "/scripts/traps", "Lua traps (" + mod.id + ")", LuaTrapRegistry::size);
 		}
 	}
 
@@ -447,6 +483,8 @@ public class LuaEngine implements ResourceFinder {
 		g.set("register_level", new RegisterLevelFunction());
 		g.set("register_buff", new RegisterBuffFunction());
 		g.set("register_talent_override", new RegisterTalentOverrideFunction());
+		g.set("register_painter", new RegisterPainterFunction());
+		g.set("register_trap", new RegisterTrapFunction());
 		g.set("RPD", RpdApi.build());
 	}
 
@@ -532,6 +570,59 @@ public class LuaEngine implements ResourceFinder {
 				LuaNpcRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_npc rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_painter(table)} global handed to Lua (M10b). Validates
+	 * the required {@code id} (Room class simple name) and skips on bad input.
+	 * The optional {@code paint}/{@code decorate} callbacks are plain table
+	 * entries validated lazily by {@link LuaItemCallbacks} at paint time.
+	 */
+	private static class RegisterPainterFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_painter: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				// paint/decorate are optional table entries; no validation here.
+				LuaPainterRegistry.register(id, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_painter rejected a malformed definition", e);
+			}
+			return NIL;
+		}
+	}
+
+	/**
+	 * The {@code register_trap(table)} global handed to Lua (M10b). Mirrors
+	 * {@link RegisterNpcFunction}: validates {@code id} and skips on bad input.
+	 * {@code name/color/shape} are optional (defaults applied in {@link LuaTrap});
+	 * {@code onActivate} is a plain table entry validated lazily by
+	 * {@link LuaItemCallbacks}.
+	 */
+	private static class RegisterTrapFunction extends OneArgFunction {
+		@Override
+		public LuaValue call(LuaValue arg) {
+			try {
+				if (!arg.istable()) {
+					Gdx.app.error(TAG, "register_trap: expected a table, got " + arg.typename());
+					return NIL;
+				}
+				LuaTable tbl = arg.checktable();
+				String id = tbl.get("id").checkjstring();
+				tbl.get("name").optjstring(id);
+				tbl.get("color").optint(com.shatteredpixel.shatteredpixeldungeon.levels.traps.Trap.GREY);
+				tbl.get("shape").optint(com.shatteredpixel.shatteredpixeldungeon.levels.traps.Trap.DOTS);
+				LuaTrapRegistry.register(id, tbl);
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "register_trap rejected a malformed definition", e);
 			}
 			return NIL;
 		}
