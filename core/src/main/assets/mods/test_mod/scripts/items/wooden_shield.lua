@@ -1,19 +1,27 @@
--- M10a shield item: Remished WoodenShield(木盾)。走 LuaItem(weapon 占位 wrapper —— 无 LuaArmor/left_hand 槽)。
--- supervisor 指示:基础属性先写(tier=level/name/desc/image/price),drBonus 回调标注降级。
--- 降级(M10c):drBonus 格挡、blockChance/blockDamage/recharge、left_hand 槽、shields.makeShield 桥接 ——
---   drBonus 函数字段当前不被 Java 调用(惰性无害),M10c armor 桥接落地后直接读取。
--- 原件: ../remished-dungeon/scripts/items/WoodenShield.lua
+-- M11a: Remished WoodenShield(木盾)。走 LuaItem(weapon 占位 wrapper)。
+-- 真实 DR/格挡由装备时挂的 LuaBuff `wooden_shield_guard` 提供。
+-- 仍降级:无 left_hand 装备槽,走 weapon 槽。
+local SHIELD_LEVEL = 1
+local GUARD_BUFF = "wooden_shield_guard"
+
 register_item {
     id = "wooden_shield",
     name = "木盾",
-    desc = "一面简陋的木盾。原版可左手装备并格挡伤害(降级:drBonus/格挡/left_hand 槽 待 M10c)。",
+    desc = "一面简陋的木盾。装备时提供 1 点额外护甲(无左手槽,占用武器槽)。",
     image = 60,
     tier = 1,
     price = 20,
-    shieldLevel = 1,
+    shieldLevel = SHIELD_LEVEL,
 
-    -- DEGRADED: needs M10c (LuaArmor/left_hand + drBonus dispatch). Inert until wired.
-    drBonus = function(heroId)
-        return 1
+    onEquip = function(heroId)
+        if RPD and RPD.permanentBuff then
+            RPD.permanentBuff(heroId, GUARD_BUFF, SHIELD_LEVEL)
+        end
+    end,
+
+    onDeactivate = function(heroId)
+        if RPD and RPD.removeBuff then
+            RPD.removeBuff(heroId, GUARD_BUFF)
+        end
     end,
 }

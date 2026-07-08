@@ -246,12 +246,12 @@ public class LuaBuff extends Buff {
     // function, Lua error, or non-numeric return passes the value through
     // unchanged so a broken script never freezes combat.
 
-    /** Amend outgoing damage on the bearer's own attack. */
+    /** Amend outgoing damage on the bearer's own attack. M11a: also passes state. */
     public int attackProc(int selfId, int enemyId, int damage) {
         LuaTable tbl = luaTable();
         if (tbl == null) return damage;
         return LuaItemCallbacks.callOptInt(tbl, "attackProc", damage,
-                LuaValue.valueOf(selfId), LuaValue.valueOf(enemyId), LuaValue.valueOf(damage));
+                LuaValue.valueOf(selfId), LuaValue.valueOf(enemyId), LuaValue.valueOf(damage), state);
     }
 
     /** Amend incoming damage before it is applied to the bearer. */
@@ -540,14 +540,15 @@ public class LuaBuff extends Buff {
      * M10c: this buff's {@code damage} amendment (NYRDS {@code charGotDamage} —
      * return-consuming, composed in attach order). {@code srcId} is the source
      * Char id, or -1 when the source is not a Char (hunger, falling, etc.) —
-     * passed to Lua as nil. Fail-open: missing fn / error / non-int → passthrough.
+     * passed to Lua as nil. M11a: also passes state. Fail-open: missing fn /
+     * error / non-int → passthrough.
      */
     private int damage(int selfId, int srcId, int dmg) {
         LuaTable tbl = luaTable();
         if (tbl == null) return dmg;
         LuaValue srcArg = srcId >= 0 ? LuaValue.valueOf(srcId) : LuaValue.NIL;
         return LuaItemCallbacks.callOptInt(tbl, "damage", dmg,
-                LuaValue.valueOf(selfId), srcArg, LuaValue.valueOf(dmg));
+                LuaValue.valueOf(selfId), srcArg, LuaValue.valueOf(dmg), state);
     }
 
     /**

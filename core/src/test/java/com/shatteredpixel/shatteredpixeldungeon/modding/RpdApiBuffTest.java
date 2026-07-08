@@ -31,6 +31,7 @@ import java.lang.reflect.Field;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -121,16 +122,18 @@ public class RpdApiBuffTest {
     }
 
     @Test
-    public void enabledModLoadsAll16BuffScripts() {
+    public void enabledModLoadsAll21BuffScripts() {
         LuaEngine.init();
-        // 16 Remished ports (see PLAN §Steps 7). Exact size catches a misnamed script.
-        assertEquals("test_mod ships 16 buff ports", 16, LuaBuffRegistry.size());
+        // 16 Remished ports (see PLAN §Steps 7) + 5 M11a shield_guard buffs. Exact size catches a misnamed script.
+        assertEquals("test_mod ships 21 buff ports", 21, LuaBuffRegistry.size());
         assertTrue(LuaBuffRegistry.contains("gases_immunity"));
         assertTrue(LuaBuffRegistry.contains("cloak"));
         assertTrue(LuaBuffRegistry.contains("counter"));
         assertTrue(LuaBuffRegistry.contains("champion_of_earth"));
         assertTrue(LuaBuffRegistry.contains("shield_left"));
         assertTrue(LuaBuffRegistry.contains("chaos_shield_left"));
+        assertTrue("M11a wooden_shield_guard loads", LuaBuffRegistry.contains("wooden_shield_guard"));
+        assertTrue("M11a chaos_shield_guard loads", LuaBuffRegistry.contains("chaos_shield_guard"));
     }
 
     // ---- affect / remove / permanent on a live Char ----
@@ -1166,6 +1169,155 @@ public class RpdApiBuffTest {
                 "return pcall(function() return luajava.bindClass('java.lang.Runtime') end)"
         ).call();
         assertFalse("luajava.bindClass still fails with shield API present", ok.toboolean());
+    }
+
+    // ---- M11a shield guard callbacks ----
+
+    @Test
+    public void woodenShieldGuardDrBonusApplies() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.permanentBuff(" + h.id() + ", 'wooden_shield_guard', 1)").call();
+            LuaBuff lb = findLuaBuff(h, "wooden_shield_guard");
+            assertNotNull(lb);
+            assertTrue("wooden_shield_guard is permanent", lb.isPermanent());
+            assertEquals("wooden shield drBonus +1", 11, lb.drRoll(h.id(), 10));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void royalShieldGuardDrBonusAndSpeedMultiplierApply() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.permanentBuff(" + h.id() + ", 'royal_shield_guard', 4)").call();
+            LuaBuff lb = findLuaBuff(h, "royal_shield_guard");
+            assertNotNull(lb);
+            assertEquals("royal shield drBonus +4", 14, lb.drRoll(h.id(), 10));
+            assertEquals("royal shield speed multiplier 0.85", 8.5f, lb.speed(h.id(), 10.0f), 0.001f);
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void strongAndToughShieldGuardMultipliersApply() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.permanentBuff(" + h.id() + ", 'tough_shield_guard', 2)").call();
+            LuaBuff tough = findLuaBuff(h, "tough_shield_guard");
+            assertNotNull(tough);
+            assertEquals("tough shield drBonus +2", 12, tough.drRoll(h.id(), 10));
+            assertEquals("tough shield speed multiplier 0.95", 9.5f, tough.speed(h.id(), 10.0f), 0.001f);
+
+            g.load("RPD.permanentBuff(" + h.id() + ", 'strong_shield_guard', 3)").call();
+            LuaBuff strong = findLuaBuff(h, "strong_shield_guard");
+            assertNotNull(strong);
+            assertEquals("strong shield drBonus +3", 13, strong.drRoll(h.id(), 10));
+            assertEquals("strong shield speed multiplier 0.90", 9.0f, strong.speed(h.id(), 10.0f), 0.001f);
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void shieldGuardRemovalWorks() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.permanentBuff(" + h.id() + ", 'tough_shield_guard', 2)").call();
+            assertNotNull(findLuaBuff(h, "tough_shield_guard"));
+            g.load("RPD.removeBuff(" + h.id() + ", 'tough_shield_guard')").call();
+            assertNull("removeBuff detaches shield guard", findLuaBuff(h, "tough_shield_guard"));
+        } finally {
+            Actor.remove(h);
+        }
+    }
+
+    @Test
+    public void chaosShieldGuardChargeUpgradesAndDowngrades() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.permanentBuff(" + h.id() + ", 'chaos_shield_guard', 3)").call();
+            LuaBuff lb = findLuaBuff(h, "chaos_shield_guard");
+            assertNotNull(lb);
+
+            // Baseline DR = level 3.
+            assertEquals("chaos shield starts at level 3", 13, lb.drRoll(h.id(), 10));
+
+            // attackProc with 20 damage -> charge += 10. cap for level 3 = ceil(5*3^1.5)=26.
+            // not enough to upgrade.
+            assertEquals("attackProc returns original damage", 20, lb.attackProc(h.id(), enemy.id(), 20));
+            assertEquals("chaos shield still level 3", 13, lb.drRoll(h.id(), 10));
+
+            // attackProc with 40 damage -> charge += 20, total 30 >= 26 -> level 4.
+            assertEquals("attackProc returns original damage", 40, lb.attackProc(h.id(), enemy.id(), 40));
+            assertEquals("chaos shield upgraded to level 4", 14, lb.drRoll(h.id(), 10));
+
+            // damage callback with 30 incoming -> charge -= 10. cap for level 4 = ceil(5*4^1.5)=40,
+            // charge starts 0 after upgrade, so 0-10 < 0 -> level 3 (with half-cap carry).
+            assertEquals("damage callback returns original damage", 30, LuaBuff.dispatchDamage(h, 30, enemy));
+            assertEquals("chaos shield degraded to level 3", 13, lb.drRoll(h.id(), 10));
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
+    }
+
+    @Test
+    public void chaosShieldGuardIgnoresZeroDamage() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.permanentBuff(" + h.id() + ", 'chaos_shield_guard', 3)").call();
+            LuaBuff lb = findLuaBuff(h, "chaos_shield_guard");
+            assertNotNull(lb);
+
+            // fully reduced/zero incoming damage must not drain charge or degrade level
+            assertEquals("zero damage returns 0", 0, LuaBuff.dispatchDamage(h, 0, enemy));
+            assertEquals("level unchanged after zero damage", 13, lb.drRoll(h.id(), 10));
+            assertNull("no glow after zero damage", lb.computeTint());
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
+    }
+
+    @Test
+    public void chaosShieldGuardGlowsWhenCharged() throws Exception {
+        LuaEngine.init();
+        Hero h = freshHero();
+        Hero enemy = freshHero();
+        try {
+            Globals g = LuaEngine.instance().globals();
+            g.load("RPD.permanentBuff(" + h.id() + ", 'chaos_shield_guard', 3)").call();
+            LuaBuff lb = findLuaBuff(h, "chaos_shield_guard");
+            assertNotNull(lb);
+
+            assertNull("no glow with zero charge", lb.computeTint());
+
+            lb.attackProc(h.id(), enemy.id(), 10); // adds 5 charge
+            LuaBuff.TintSpec spec = lb.computeTint();
+            assertNotNull("glow appears when charged", spec);
+            assertTrue("chaos shield glow is aura", spec.aura);
+            assertEquals("chaotic purple when charged", 0x9900CC, spec.color);
+        } finally {
+            Actor.remove(h);
+            Actor.remove(enemy);
+        }
     }
 
     // ---- helpers ----

@@ -1,17 +1,25 @@
--- M10a shield item: Remished RoyalShield(皇家盾)。走 LuaItem(weapon 占位 wrapper)。见 wooden_shield.lua 头注。
--- 降级(M10c):drBonus/格挡/left_hand 槽 待 M10c 桥接。
--- 原件: ../remished-dungeon/scripts/items/RoyalShield.lua
+-- M11a: Remished RoyalShield(皇家盾)。走 LuaItem(weapon 占位 wrapper)。
+local SHIELD_LEVEL = 4
+local GUARD_BUFF = "royal_shield_guard"
+
 register_item {
     id = "royal_shield",
     name = "皇家盾",
-    desc = "饰有皇家纹章的精钢大盾。原版可左手装备并格挡伤害(降级:drBonus/格挡/left_hand 槽 待 M10c)。",
+    desc = "饰有皇家纹章的精钢大盾。装备时提供 4 点额外护甲,但明显减速(无左手槽,占用武器槽)。",
     image = 63,
     tier = 4,
     price = 640,
-    shieldLevel = 4,
+    shieldLevel = SHIELD_LEVEL,
 
-    -- DEGRADED: needs M10c. Inert until wired.
-    drBonus = function(heroId)
-        return 4
+    onEquip = function(heroId)
+        if RPD and RPD.permanentBuff then
+            RPD.permanentBuff(heroId, GUARD_BUFF, SHIELD_LEVEL)
+        end
+    end,
+
+    onDeactivate = function(heroId)
+        if RPD and RPD.removeBuff then
+            RPD.removeBuff(heroId, GUARD_BUFF)
+        end
     end,
 }

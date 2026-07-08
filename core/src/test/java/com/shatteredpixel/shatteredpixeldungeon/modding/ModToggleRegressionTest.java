@@ -84,6 +84,7 @@ public class ModToggleRegressionTest {
 		assertFalse(LuaShopRegistry.contains("test_shop"));
 		assertFalse("M6c buffs must not load when disabled", LuaBuffRegistry.contains("gases_immunity"));
 		assertFalse(LuaBuffRegistry.contains("cloak"));
+		assertFalse("M11a shield guards must not load when disabled", LuaBuffRegistry.contains("wooden_shield_guard"));
 	}
 
 	@Test
@@ -127,11 +128,12 @@ public class ModToggleRegressionTest {
 		assertTrue(LuaNpcRegistry.contains("town_portal"));
 		assertTrue(LuaNpcRegistry.contains("town_return"));
 		assertTrue(LuaShopRegistry.contains("test_shop"));
-		// M6c: 16 Remished buff ports (PLAN §Steps 7). ID + exact-size guards.
+		// M6c+M11a: 16 Remished buff ports + 5 shield_guard buffs. ID + exact-size guards.
 		assertTrue("M6c gases_immunity loads", LuaBuffRegistry.contains("gases_immunity"));
 		assertTrue("M6c cloak loads", LuaBuffRegistry.contains("cloak"));
 		assertTrue("M6c chaos_shield_left loads", LuaBuffRegistry.contains("chaos_shield_left"));
-		assertEquals("16 M6c buff ports", 16, LuaBuffRegistry.size());
+		assertTrue("M11a wooden_shield_guard loads", LuaBuffRegistry.contains("wooden_shield_guard"));
+		assertEquals("16 M6c + 5 M11a shield guard buff ports", 21, LuaBuffRegistry.size());
 		// M7e: 2 talent override scripts (hearty_meal lower+desc, iron_will desc-only).
 		// M8d1: +1 forwarded from register_talent (mod_example.lua → MOD_EXAMPLE_TALENT),
 		// since register_talent reuses the M7e override path for desc/maxPoints/title.
