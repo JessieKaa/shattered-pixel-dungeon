@@ -38,8 +38,9 @@ import java.util.zip.ZipInputStream;
  *   <li>Restart-to-load contract (M12a) is preserved: import only drops files; no hot reload.</li>
  * </ul>
  *
- * <p>Error codes: {@code io_error}, {@code invalid_zip}, {@code too_many_entries},
+ * <p>Error codes (install): {@code io_error}, {@code invalid_zip}, {@code too_many_entries},
  * {@code zip_too_large}, {@code bad_manifest}, {@code version_mismatch}, {@code already_exists}.
+ * Error codes (remove): {@code not_found}, {@code not_external}, {@code io_error}.
  */
 public final class ModInstaller {
 
@@ -101,6 +102,51 @@ public final class ModInstaller {
 			cleanup(staging);
 			cb.onError("io_error");
 		}
+	}
+
+	// ---- remove (M13a) ------------------------------------------------------
+
+	/**
+	 * Uninstall an external mod by deleting its {@code mods_user/<id>/} directory (M13a, the
+	 * reverse of {@link #installFromStream}). Resolves the mod through {@link ModRegistry} so the
+	 * {@link ModManifest#origin} guard is authoritative: only {@link ModManifest.Origin#EXTERNAL}
+	 * mods are deletable. Builtin mods (classpath assets) and unknown ids are refused &mdash; this
+	 * origin guard is the safety core that prevents deleting game assets. The deletion target is
+	 * always the mod's own {@link ModManifest#baseDir} (= {@code mods_user/<id>/}), never the
+	 * {@code mods_user/} root, so a corrupt or malicious id cannot widen the blast radius.
+	 *
+	 * <p>Registration is irreversible at the Lua layer (registered items/spells survive until
+	 * restart), so callers must communicate the restart-to-apply contract (mirrors the M12 import
+	 * contract). The callback is invoked exactly once, on the caller's thread.
+	 *
+	 * <p>Error codes: {@code not_found} (id not in registry), {@code not_external} (builtin / null
+	 * origin), {@code io_error} (delete failed). Reuses {@link ModImporter.ImportCallback};
+	 * {@code onCancel} is never called (no cancellation semantics).
+	 */
+	public static void removeMod(String id, ModImporter.ImportCallback cb) {
+		if (cb == null) return;
+		ModManifest m = ModRegistry.get(id);
+		if (m == null) {
+			cb.onError("not_found");
+			return;
+		}
+		// Origin guard: only EXTERNAL mods live under the writable mods_user/ root. BUILTIN mods
+		// resolve to classpath/internal handles (game assets) and must never be deleted. A null
+		// origin (un-scanned manifest) also fails here — fail-safe rather than guess.
+		if (m.origin != ModManifest.Origin.EXTERNAL) {
+			cb.onError("not_external");
+			return;
+		}
+		try {
+			if (!m.baseDir.deleteDirectory()) {
+				cb.onError("io_error");
+				return;
+			}
+		} catch (Throwable t) {
+			cb.onError("io_error");
+			return;
+		}
+		cb.onSuccess(id);
 	}
 
 	// ---- unzip ---------------------------------------------------------------

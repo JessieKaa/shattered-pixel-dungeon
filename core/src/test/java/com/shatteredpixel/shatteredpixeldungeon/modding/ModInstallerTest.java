@@ -2,6 +2,7 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.watabou.noosa.Game;
+import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -58,6 +59,15 @@ public class ModInstallerTest {
 	public void ensureDefault() {
 		// Defensive: restore in case a prior test in another class left a stale value.
 		Game.versionCode = TEST_VERSION_CODE;
+		// M13a removeMod tests read ModRegistry; reset its static cache so each case starts clean
+		// and no state leaks into other test classes.
+		ModRegistry.resetForTests();
+	}
+
+	@After
+	public void clearRegistry() {
+		// Leave ModRegistry pristine for whatever runs next.
+		ModRegistry.resetForTests();
 	}
 
 	// ---- success cases -------------------------------------------------------
@@ -259,6 +269,87 @@ public class ModInstallerTest {
 		assertEquals("zip_too_large", cb.err);
 		assertFalse(new File(modsUser, "fatmod").exists());
 		assertNoStaging(modsUser);
+	}
+
+	// ---- removeMod (M13a) ----------------------------------------------------
+
+	// removeMod resolves its target through ModRegistry, so each case seeds the registry via the
+	// package-private scanExternal/scanDir seams against a temp dir (mirrors LuaEngineExternalLoadTest's
+	// new FileHandle(tmpDir) pattern). removeMod itself never touches Gdx.files.local — it deletes
+	// mod.baseDir, which the scanner already resolved to an absolute FileHandle.
+
+	@Test
+	public void removeMod_external_success_deletesDir() throws Exception {
+		File modsUser = tmp.newFolder("mods_user");
+		File modDir = new File(modsUser, "imp_a");
+		File scripts = new File(modDir, "scripts");
+		scripts.mkdirs();   // creates imp_a/ and imp_a/scripts/
+		java.nio.file.Files.write(new File(modDir, "mod.json").toPath(), modJson("imp_a", TEST_VERSION_CODE));
+		java.nio.file.Files.write(new File(scripts, "x.lua").toPath(), "-- x".getBytes(StandardCharsets.UTF_8));
+
+		ModRegistry.scanExternal(new FileHandle(modsUser));   // origin EXTERNAL
+		CapturingCb cb = new CapturingCb();
+		ModInstaller.removeMod("imp_a", cb);
+
+		assertEquals("imp_a", cb.ok);
+		assertNull("expected no error, got " + cb.err, cb.err);
+		assertFalse("mods_user/imp_a/ must be deleted recursively", modDir.exists());
+	}
+
+	@Test
+	public void removeMod_builtin_refused() throws Exception {
+		// Safety core: a builtin (classpath) mod must never be deleted.
+		File builtinRoot = tmp.newFolder("mods");
+		File modDir = new File(builtinRoot, "builtinmod");
+		modDir.mkdirs();
+		java.nio.file.Files.write(new File(modDir, "mod.json").toPath(), modJson("builtinmod", TEST_VERSION_CODE));
+
+		ModRegistry.scanDir(new FileHandle(builtinRoot));   // origin BUILTIN
+		CapturingCb cb = new CapturingCb();
+		ModInstaller.removeMod("builtinmod", cb);
+
+		assertEquals("not_external", cb.err);
+		assertNull(cb.ok);
+		assertTrue("builtin dir must survive the refused removal", modDir.exists());
+		assertTrue("builtin manifest must survive", new File(modDir, "mod.json").exists());
+	}
+
+	@Test
+	public void removeMod_unknownId_notFound() throws Exception {
+		File modsUser = tmp.newFolder("mods_user");
+		File modDir = new File(modsUser, "imp_a");
+		modDir.mkdirs();
+		java.nio.file.Files.write(new File(modDir, "mod.json").toPath(), modJson("imp_a", TEST_VERSION_CODE));
+		ModRegistry.scanExternal(new FileHandle(modsUser));
+
+		CapturingCb cb = new CapturingCb();
+		ModInstaller.removeMod("nonexistent", cb);
+
+		assertEquals("not_found", cb.err);
+		assertNull(cb.ok);
+		assertTrue("existing mod must be untouched when another id is queried", modDir.exists());
+	}
+
+	@Test
+	public void removeMod_dirMissing_ioError() throws Exception {
+		// Registry still holds the manifest, but its baseDir vanished between scan and remove:
+		// FileHandle.deleteDirectory() on a non-existent path returns false → io_error (fail-safe,
+		// never reports success for a delete that did not happen).
+		File modsUser = tmp.newFolder("mods_user");
+		File modDir = new File(modsUser, "imp_a");
+		modDir.mkdirs();
+		java.nio.file.Files.write(new File(modDir, "mod.json").toPath(), modJson("imp_a", TEST_VERSION_CODE));
+		ModRegistry.scanExternal(new FileHandle(modsUser));
+
+		assertTrue(new File(modDir, "mod.json").delete());
+		assertTrue(modDir.delete());
+		assertFalse("precondition: dir gone before removeMod", modDir.exists());
+
+		CapturingCb cb = new CapturingCb();
+		ModInstaller.removeMod("imp_a", cb);
+
+		assertEquals("io_error", cb.err);
+		assertNull(cb.ok);
 	}
 
 	// ---- helpers -------------------------------------------------------------
