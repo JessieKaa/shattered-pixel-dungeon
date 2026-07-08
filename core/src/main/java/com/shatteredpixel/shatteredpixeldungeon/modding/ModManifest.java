@@ -19,7 +19,12 @@ import java.util.regex.Pattern;
  */
 public final class ModManifest {
 
-	private static final Pattern ID_PATTERN = Pattern.compile("^[a-z0-9_]+$");
+	/**
+	 * Charset a mod id must match ({@code ^[a-z0-9_]+$}). Package-private so the Lua
+	 * {@code register_level} boundary ({@link LuaEngine}) can reuse the same constraint for
+	 * level ids — a level id is interpolated into a file path, so it must be traversal-safe.
+	 */
+	static final Pattern ID_PATTERN = Pattern.compile("^[a-z0-9_]+$");
 
 	/**
 	 * Where a mod was discovered (M12a). Determines how {@link LuaEngine} loads its scripts:
