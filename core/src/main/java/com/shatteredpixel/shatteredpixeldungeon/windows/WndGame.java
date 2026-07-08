@@ -27,6 +27,7 @@ import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
 import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaDebugService;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaLevelService;
 import com.shatteredpixel.shatteredpixeldungeon.modding.ModdingService;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.HeroSelectScene;
@@ -125,6 +126,10 @@ public class WndGame extends Window {
 
 		// --- Fork: M0 Lua modding PoC — debug-only button to spawn the Lua test sword ---
 		LuaDebugService.addMenuButton(this);
+		// --- Fork end ---
+
+		// --- Fork(M13b): custom-level discovery — registered levels enterable in release ---
+		LuaLevelService.addMenuButtons(this);
 		// --- Fork end ---
 
 		resize( WIDTH, pos );

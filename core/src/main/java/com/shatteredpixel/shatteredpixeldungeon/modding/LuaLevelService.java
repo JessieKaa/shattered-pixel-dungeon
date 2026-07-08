@@ -11,15 +11,22 @@ import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
+import com.shatteredpixel.shatteredpixeldungeon.ui.Icons;
+import com.shatteredpixel.shatteredpixeldungeon.ui.RedButton;
+import com.shatteredpixel.shatteredpixeldungeon.windows.WndGame;
 import com.watabou.noosa.Game;
 import com.watabou.utils.Bundle;
 import com.watabou.utils.Callback;
 import com.watabou.utils.DeviceCompat;
 import com.watabou.utils.Random;
 import org.luaj.vm2.LuaTable;
+import org.luaj.vm2.LuaValue;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * Coordinates entering / leaving a {@link DataDrivenLevel} at runtime, and (M4d)
@@ -98,12 +105,14 @@ public final class LuaLevelService {
 	}
 
 	/**
-	 * Build and enter the named JSON level. Debug-gated; never throws — on any failure it
-	 * logs and leaves the player on the current level rather than half-switching.
+	 * Build and enter the named JSON level. A registered level
+	 * ({@link LuaLevelRegistry#contains}) is enterable in release; an unregistered id stays
+	 * debug-only (see {@link #isEnterAllowed}). Never throws — on any failure it logs and
+	 * leaves the player on the current level rather than half-switching.
 	 */
 	public static void enterLevel(String id) {
-		if (!DeviceCompat.isDebug()) {
-			Gdx.app.error(TAG, "enterLevel ignored: not a debug build");
+		if (!isEnterAllowed(id)) {
+			Gdx.app.error(TAG, "enterLevel ignored: '" + id + "' not registered (release build)");
 			return;
 		}
 		if (Dungeon.hero == null || !Dungeon.hero.isAlive()) {
@@ -169,6 +178,57 @@ public final class LuaLevelService {
 		String classpath = (entry != null && entry.path != null)
 				? entry.path : LEVELS_DIR + id + ".json";
 		return DataDrivenLevel.fromAsset(classpath, id);
+	}
+
+	// ---- M13b: custom-level discovery (release player entry for registered levels) ----
+
+	/**
+	 * Whether {@link #enterLevel} will honour {@code id} in the current build. A level
+	 * registered via {@code register_level} ({@link LuaLevelRegistry#contains}) is enterable
+	 * in release; any other id — a bare {@code mods/levels/<id>.json} asset that nobody
+	 * registered — stays debug-only. This is the C3 guard: players cannot reach unvetted
+	 * level assets in a release build, only the mod authors' registered-and-named set.
+	 *
+	 * <p>Mirrors the release-opening precedent of {@link #injectLevelTraps}, whose gate is
+	 * {@link LuaTrapRegistry#hasAny()} rather than {@link DeviceCompat#isDebug()} (M9 opened
+	 * modding to release): the registry membership, not the build type, decides.
+	 *
+	 * <p>Extracted as a standalone predicate (rather than inlined in {@code enterLevel}) so
+	 * the gate decision is unit-testable without the {@link Dungeon#hero}/{@code saveAll}/
+	 * {@code switchLevel} stack — same seam convention as {@code injectLevelNpcs}-&gt;
+	 * {@code spawnForDepth} and {@code injectLevelTraps}-&gt;{@code placeLuaTraps}.
+	 */
+	public static boolean isEnterAllowed(String id) {
+		return LuaLevelRegistry.contains(id) || DeviceCompat.isDebug();
+	}
+
+	/**
+	 * The enterable level ids in a stable (alphabetical) order, for the discovery UI.
+	 * Returns a fresh list (the registry keyset is immutable). Empty when no mod has
+	 * registered a level — {@link #addMenuButtons} hides the menu entry in that case.
+	 */
+	public static List<String> listEnterableLevels() {
+		List<String> ids = new ArrayList<>(LuaLevelRegistry.ids());
+		Collections.sort(ids);
+		return ids;
+	}
+
+	/**
+	 * Display name for a registered level, read from the {@code name} field the mod author
+	 * passed to {@code register_level}. {@code register_level} requires {@code name} as a
+	 * string, so the happy path is a direct read; this falls back to {@code id} on a missing
+	 * entry, non-string value, or Lua error rather than letting the UI throw. Package-visible
+	 * so the discovery window and the headless test share one resolver.
+	 */
+	static String levelDisplayName(String id) {
+		LuaLevelRegistry.Entry entry = LuaLevelRegistry.get(id);
+		if (entry == null) return id;
+		try {
+			LuaValue name = entry.table.get("name");
+			return name.isstring() ? name.tojstring() : id;
+		} catch (Exception e) {
+			return id;
+		}
 	}
 
 	/**
@@ -422,5 +482,33 @@ public final class LuaLevelService {
 			level.map[pos] = Terrain.SECRET_TRAP;
 			level.updateCellFlags(pos);    // refresh secret/passable/solid for this cell
 		}
+	}
+
+	// ---- M13b: WndGame menu hook ----
+
+	private static final boolean LANG_ZH =
+			Locale.getDefault().getLanguage().equalsIgnoreCase("zh");
+	private static final String MENU_BTN_ZH = "自定义关卡";
+	private static final String MENU_BTN_EN = "Custom Levels";
+
+	/**
+	 * Single-point hook invoked near the end of {@link WndGame#WndGame()} (mirrors
+	 * {@code SaveSlotService.addMenuButtons}). Adds a "Custom Levels" button that opens
+	 * {@link WndCustomLevels} — but only when at least one level is registered. Vanilla
+	 * runs (no {@code register_level} calls) hit the empty-list early return and see no
+	 * button, so the original playthrough menu is unchanged (C3).
+	 */
+	public static void addMenuButtons(WndGame wnd) {
+		if (listEnterableLevels().isEmpty()) return;
+
+		RedButton btn = new RedButton(LANG_ZH ? MENU_BTN_ZH : MENU_BTN_EN) {
+			@Override
+			protected void onClick() {
+				wnd.hide();
+				GameScene.show(new WndCustomLevels());
+			}
+		};
+		btn.icon(Icons.get(Icons.DEPTH));
+		wnd.addButton(btn);
 	}
 }
