@@ -29,6 +29,7 @@ import com.shatteredpixel.shatteredpixeldungeon.items.rings.RingOfEnergy;
 import com.shatteredpixel.shatteredpixeldungeon.items.trinkets.ChaoticCenser;
 import com.shatteredpixel.shatteredpixeldungeon.items.trinkets.SaltCube;
 import com.shatteredpixel.shatteredpixeldungeon.levels.VaultLevel;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaBuff;
 import com.watabou.utils.Bundle;
 
 public class Regeneration extends Buff {
@@ -82,7 +83,11 @@ public class Regeneration extends Buff {
 					delay /= SaltCube.healthRegenMultiplier();
 				}
 
-				partialRegen += 1f / delay;
+				// M10c: regenerationBonus — Remished hook, summed across the hero's
+				// LuaBuffs. NYRDS canon healRate = 1.2^bonus (exponential), applied
+				// here as the fractional-accumulation rate so bonus>0 regenerates
+				// faster. 0 bonus → pow(1.2,0)=1 → normal rate.
+				partialRegen += (float) Math.pow(1.2f, LuaBuff.dispatchRegenBonus(target)) / delay;
 
 				if (partialRegen >= 1) {
 					target.HP += (int)partialRegen;

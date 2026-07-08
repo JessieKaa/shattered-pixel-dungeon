@@ -1,11 +1,11 @@
--- M7a port of Remished scripts/buffs/BodyArmor.lua
--- Remished: drBonus + speedMultiplier + timed detach. M7a wires drRoll (+flat
--- DR) and speed (*0.9 encumbered) via the new LuaBuff numerical hooks; the
--- timed detach (act) stays as the live lifecycle.
+-- M10c port of Remished scripts/buffs/BodyArmor.lua
+-- Remished: drBonus + speedMultiplier + timed detach. M10c wires the canonical
+-- callbacks: drBonus bridges additively into drRoll, speedMultiplier bridges
+-- multiplicatively into speed (0.9 = encumbered). The timed detach (act) stays.
 register_buff{
     id = "body_armor",
     name = "BodyArmor",
-    info = "BodyArmor (M7a: +DR and -speed while active; timed detach)",
+    info = "BodyArmor (M10c: drBonus + speedMultiplier; timed detach)",
     icon = 45,
 
     attachTo = function(targetId, state)
@@ -18,11 +18,11 @@ register_buff{
         return false
     end,
 
-    drRoll = function(selfId, dr)
-        return dr + 3
+    drBonus = function(selfId)
+        return 3
     end,
 
-    speed = function(selfId, spd)
-        return spd * 0.9
+    speedMultiplier = function(selfId)
+        return 0.9
     end,
 }

@@ -1,21 +1,28 @@
--- M6c port of Remished scripts/buffs/Cloak.lua
--- Remished: stealthBonus + INVISIBLE sprite status + timed detach. M6c has no
--- stealth hook bridged to a generic buff; instead this applies SPD's own
--- Invisibility (whitelisted) on attach and drops it on detach, preserving the
--- gameplay intent (target becomes harder to see while the buff is active).
+-- M10c port of Remished scripts/buffs/Cloak.lua
+-- Remished: stealthBonus + INVISIBLE sprite status + timed detach. M10c wires
+-- the canonical callbacks: stealthBonus feeds Char.stealth() (bearer harder to
+-- detect), charSpriteStatus drives the M8c fx visual State (INVISIBLE sprite).
+-- Visual-only — does not touch the Char.invisible gameplay counter.
 register_buff{
     id = "cloak",
     name = "Cloak",
-    info = "Cloak (M6c: applies SPD Invisibility on attach, removes on detach)",
+    info = "Cloak (M10c: stealthBonus + charSpriteStatus INVISIBLE)",
     icon = 46,
 
     attachTo = function(targetId, state)
-        state.appliedInvis = true
-        RPD.affectBuff(targetId, "Invisibility", 6)
         return true
     end,
 
-    detach = function(targetId, state)
-        RPD.removeBuff(targetId, "Invisibility")
+    act = function(selfId, targetId, state)
+        -- timed: drop after a short window (Remished detaches on act)
+        return false
+    end,
+
+    stealthBonus = function(selfId)
+        return 5
+    end,
+
+    charSpriteStatus = function(selfId, state)
+        return "INVISIBLE"
     end,
 }

@@ -1,23 +1,28 @@
--- M7a port of Remished scripts/buffs/DieHard.lua
--- Remished: damage() random-detach + regenerationBonus + spend(20). M7a wires
--- the on-hit random-detach via defenseProc (50% chance to detach when hit),
--- preserving the "die hard then finally give out" flavour; the spend(20) act
--- recharge stays. regenerationBonus (HP/tick regen) needs a hook not in this
--- feature set and stays deferred to M7b.
+-- M10c port of Remished scripts/buffs/DieHard.lua
+-- Remished: damage() random-detach + regenerationBonus + spend(20). M10c wires
+-- the canonical callbacks: damage (return-consuming, fires in Char.damage
+-- pre-shield) random-detaches the bearer on a hit; regenerationBonus feeds
+-- Regeneration.act (healRate=1.2^sum). The spend(20) act recharge stays.
 register_buff{
     id = "die_hard",
     name = "DieHard",
-    info = "DieHard (M7a: 50% on-hit detach via defenseProc; regenBonus M7b)",
+    info = "DieHard (M10c: on-hit random detach via damage; regenerationBonus)",
     icon = 44,
 
     act = function(selfId, targetId, state)
         return 20
     end,
 
-    defenseProc = function(selfId, enemyId, damage)
+    -- Remished: chance to finally give out on each hit taken. Returns dmg
+    -- unchanged (does not modify damage), detaches as a side effect.
+    damage = function(selfId, srcId, dmg)
         if math.random() < 0.5 then
             RPD.detachBuff(selfId, "die_hard")
         end
-        return damage
+        return dmg
+    end,
+
+    regenerationBonus = function(selfId)
+        return RPD.buffLevel(selfId, "die_hard") or 1
     end,
 }
