@@ -55,6 +55,7 @@ import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.items.armor.Armor;
 import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfTeleportation;
 import com.shatteredpixel.shatteredpixeldungeon.items.weapon.Weapon;
+import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
 import com.shatteredpixel.shatteredpixeldungeon.mechanics.Ballistica;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
@@ -69,6 +70,7 @@ import org.luaj.vm2.LuaValue;
 import org.luaj.vm2.lib.OneArgFunction;
 import org.luaj.vm2.lib.ThreeArgFunction;
 import org.luaj.vm2.lib.TwoArgFunction;
+import org.luaj.vm2.lib.ZeroArgFunction;
 
 /**
  * The narrow {@code RPD.*} surface injected into the Lua sandbox
@@ -238,6 +240,14 @@ final class RpdApi {
         // read-only reference constants (WALL/DOOR/WATER/GRASS/TRAP) so scripts
         // can branch on level.tileAt(cell) without magic numbers.
         rpd.set("Terrain", terrainConstants());
+        // M11c: terrain read/write API for item scripts (pickaxe mining).
+        rpd.set("terrain", new TerrainAt());
+        rpd.set("setTerrain", new SetTerrain());
+        rpd.set("isWall", new IsWall());
+        rpd.set("isSolid", new IsSolid());
+        rpd.set("dig", new Dig());
+        rpd.set("dropItem", new DropItem());
+        rpd.set("levelWidth", new LevelWidth());
         return rpd;
     }
 
@@ -262,6 +272,8 @@ final class RpdApi {
         t.set("GRASS", LuaValue.valueOf(Terrain.GRASS));
         t.set("HIGH_GRASS", LuaValue.valueOf(Terrain.HIGH_GRASS));
         t.set("FURROWED_GRASS", LuaValue.valueOf(Terrain.FURROWED_GRASS));
+        t.set("SECRET_DOOR", LuaValue.valueOf(Terrain.SECRET_DOOR));
+        t.set("BARRICADE", LuaValue.valueOf(Terrain.BARRICADE));
         t.set("TRAP", LuaValue.valueOf(Terrain.TRAP));
         t.set("SECRET_TRAP", LuaValue.valueOf(Terrain.SECRET_TRAP));
         return t;
@@ -1691,6 +1703,238 @@ final class RpdApi {
                 Gdx.app.error(TAG, "spawnMobNear threw", e);
                 return NIL;
             }
+        }
+    }
+
+    // ---- M11c terrain API ----
+
+    private static boolean levelOk(int cell) {
+        return Dungeon.level != null && Dungeon.level.insideMap(cell);
+    }
+
+    /**
+     * True only when a real {@link GameScene} is live. The terrain/drop APIs are
+     * exercised by headless tests (which set {@code Dungeon.level} but never
+     * build a scene), so every live-only visual/FOV refresh must be gated on this
+     * to stay headless-safe while still updating the tilemap/sprites on device.
+     */
+    private static boolean hasLiveScene() {
+        return Game.instance != null && (Game.scene() instanceof GameScene);
+    }
+
+    /** Live-only: repaint one tile on the tilemap after a terrain change. */
+    private static void refreshMapVisuals(int cell) {
+        if (hasLiveScene()) GameScene.updateMap(cell);
+    }
+
+    /** {@code RPD.terrain(cell)} → terrain id at cell, or nil. */
+    private static final class TerrainAt extends OneArgFunction {
+        @Override public LuaValue call(LuaValue pos) {
+            try {
+                if (!pos.isint()) {
+                    Gdx.app.error(TAG, "terrain expected int cell, got " + pos.typename());
+                    return NIL;
+                }
+                int cell = pos.toint();
+                if (!levelOk(cell)) return NIL;
+                return LuaValue.valueOf(Dungeon.level.map[cell]);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "terrain threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /**
+     * {@code RPD.setTerrain(cell, terrainId)} → set cell to a whitelisted safe
+     * terrain and update flags. Both the destination AND the current (source)
+     * terrain must be in the safe decorative set — this stops a script from
+     * erasing entrances/exits/traps/locked doors by repainting them to EMPTY.
+     */
+    private static final class SetTerrain extends TwoArgFunction {
+        // M11c: only allow the same safe decorative targets as LuaPainterAdapter.
+        private static final java.util.Set<Integer> TARGET_WHITELIST =
+                new java.util.HashSet<>(java.util.Arrays.asList(
+                        Terrain.EMPTY, Terrain.EMPTY_DECO, Terrain.EMPTY_SP, Terrain.EMBERS));
+        // Source must already be a repaintable floor/decorative tile; structural
+        // tiles (walls/doors/water/traps/transitions) are protected from erasure.
+        private static final java.util.Set<Integer> SOURCE_WHITELIST =
+                new java.util.HashSet<>(java.util.Arrays.asList(
+                        Terrain.EMPTY, Terrain.EMPTY_DECO, Terrain.EMPTY_SP, Terrain.EMBERS,
+                        Terrain.GRASS, Terrain.HIGH_GRASS, Terrain.FURROWED_GRASS));
+
+        @Override public LuaValue call(LuaValue pos, LuaValue terrainId) {
+            try {
+                if (!pos.isint() || !terrainId.isint()) {
+                    Gdx.app.error(TAG, "setTerrain expected int cell and terrain id");
+                    return NIL;
+                }
+                int cell = pos.toint();
+                int terr = terrainId.toint();
+                if (!levelOk(cell)) return NIL;
+                if (!TARGET_WHITELIST.contains(terr)) {
+                    Gdx.app.error(TAG, "setTerrain rejected non-whitelisted target " + terr);
+                    return NIL;
+                }
+                int src = Dungeon.level.map[cell];
+                if (!SOURCE_WHITELIST.contains(src)) {
+                    Gdx.app.error(TAG, "setTerrain rejected protected source terrain " + src + " at " + cell);
+                    return NIL;
+                }
+                Level.set(cell, terr);
+                refreshMapVisuals(cell);
+                return LuaValue.valueOf(true);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "setTerrain threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.levelWidth()} → current level width (int), or nil if no level. Used by item scripts to compute neighbour offsets width-agnostically. */
+    private static final class LevelWidth extends ZeroArgFunction {
+        @Override public LuaValue call() {
+            if (Dungeon.level == null) return NIL;
+            return LuaValue.valueOf(Dungeon.level.width());
+        }
+    }
+
+    /** {@code RPD.isWall(cell)} → true iff terrain at cell is WALL or WALL_DECO. */
+    private static final class IsWall extends OneArgFunction {
+        @Override public LuaValue call(LuaValue pos) {
+            try {
+                if (!pos.isint()) {
+                    Gdx.app.error(TAG, "isWall expected int cell, got " + pos.typename());
+                    return NIL;
+                }
+                int cell = pos.toint();
+                if (!levelOk(cell)) return NIL;
+                int t = Dungeon.level.map[cell];
+                return LuaValue.valueOf(t == Terrain.WALL || t == Terrain.WALL_DECO);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "isWall threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /** {@code RPD.isSolid(cell)} → true iff SOLID flag is set at cell. */
+    private static final class IsSolid extends OneArgFunction {
+        @Override public LuaValue call(LuaValue pos) {
+            try {
+                if (!pos.isint()) {
+                    Gdx.app.error(TAG, "isSolid expected int cell, got " + pos.typename());
+                    return NIL;
+                }
+                int cell = pos.toint();
+                if (!levelOk(cell)) return NIL;
+                return LuaValue.valueOf(Dungeon.level.solid[cell]);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "isSolid threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /**
+     * {@code RPD.dig(cell)} — break destructible terrain (WALL/WALL_DECO/DOOR/
+     * BARRICADE/SECRET_DOOR) into EMPTY (flammable terrain becomes EMBERS).
+     * Returns true if something was dug. Drops are intentionally left to the
+     * caller via {@code RPD.dropItem} so item scripts control the loot table.
+     */
+    private static final class Dig extends OneArgFunction {
+        @Override public LuaValue call(LuaValue pos) {
+            try {
+                if (!pos.isint()) {
+                    Gdx.app.error(TAG, "dig expected int cell, got " + pos.typename());
+                    return NIL;
+                }
+                int cell = pos.toint();
+                if (!levelOk(cell)) return NIL;
+                int t = Dungeon.level.map[cell];
+                if (!isDigTarget(t)) {
+                    Gdx.app.error(TAG, "dig rejected non-diggable terrain " + t + " at " + cell);
+                    return LuaValue.valueOf(false);
+                }
+                int replacement = (Terrain.flags[t] & Terrain.FLAMABLE) != 0 ? Terrain.EMBERS : Terrain.EMPTY;
+                Level.set(cell, replacement);
+                // Repaint the tile and recompute FOV (a dug wall opens/closes LOS).
+                refreshMapVisuals(cell);
+                if (hasLiveScene() && Dungeon.hero != null) Dungeon.observe();
+                return LuaValue.valueOf(true);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "dig threw", e);
+                return NIL;
+            }
+        }
+
+        private boolean isDigTarget(int t) {
+            return t == Terrain.WALL
+                    || t == Terrain.WALL_DECO
+                    || t == Terrain.DOOR
+                    || t == Terrain.BARRICADE
+                    || t == Terrain.SECRET_DOOR;
+        }
+    }
+
+    /** {@code RPD.dropItem(cell, itemId, qty)} — create a Lua item and drop it on the floor at cell. Returns bool. */
+    private static final class DropItem extends ThreeArgFunction {
+        @Override public LuaValue call(LuaValue pos, LuaValue itemId, LuaValue qty) {
+            try {
+                if (!pos.isint()) {
+                    Gdx.app.error(TAG, "dropItem expected int cell, got " + pos.typename());
+                    return NIL;
+                }
+                int cell = pos.toint();
+                if (!levelOk(cell)) return NIL;
+                if (!itemId.isstring()) {
+                    Gdx.app.error(TAG, "dropItem expected string itemId, got " + itemId.typename());
+                    return NIL;
+                }
+                int n = qtyOf(qty);
+                if (n < 0) {
+                    Gdx.app.error(TAG, "dropItem rejected qty " + qty);
+                    return NIL;
+                }
+                Item item = LuaItemRegistry.createItem(itemId.checkjstring());
+                if (item == null) {
+                    item = createNativeDropItem(itemId.checkjstring());
+                }
+                if (item == null) {
+                    Gdx.app.error(TAG, "dropItem: unknown item id '" + itemId.tojstring() + "'");
+                    return NIL;
+                }
+                item.quantity(n);
+                // Mirror Level.drop's heap setup: pos MUST be set before put so
+                // the heap restores at the right cell on save/load and its sprite
+                // places correctly (Heap.storeInBundle writes pos).
+                com.shatteredpixel.shatteredpixeldungeon.items.Heap heap = Dungeon.level.heaps.get(cell);
+                if (heap == null) {
+                    heap = new com.shatteredpixel.shatteredpixeldungeon.items.Heap();
+                    heap.pos = cell;
+                    Dungeon.level.heaps.put(cell, heap);
+                }
+                heap.drop(item);
+                if (hasLiveScene()) GameScene.add(heap); // give the heap a live sprite on device
+                return LuaValue.valueOf(true);
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "dropItem threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /**
+     * M11c: small whitelist for native items that Lua item scripts are allowed to
+     * drop via {@code RPD.dropItem}. These are quest/material items with no
+     * gameplay-breaking side effects; arbitrary native Class lookup is intentionally
+     * NOT exposed.
+     */
+    private static Item createNativeDropItem(String id) {
+        switch (id) {
+            case "dark_gold": return new com.shatteredpixel.shatteredpixeldungeon.items.quest.DarkGold();
+            case "mystery_meat": return new com.shatteredpixel.shatteredpixeldungeon.items.food.MysteryMeat();
+            default: return null;
         }
     }
 }
