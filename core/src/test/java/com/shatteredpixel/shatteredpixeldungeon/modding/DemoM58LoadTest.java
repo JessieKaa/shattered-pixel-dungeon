@@ -87,6 +87,9 @@ public class DemoM58LoadTest {
     private void enableDemoM58() throws Exception {
         ModRegistry.scanDir(ModTestSupport.realModsHandle());
         ModRegistry.setEnabled("demo_m58", true);
+        // remished_lite is default_enabled=true (M13c); disable it so only demo_m58's scripts
+        // register, preserving the exact-size assertions in this test.
+        ModRegistry.setEnabled("remished_lite", false);
     }
 
     // ---------------- enabled: everything registers ----------------

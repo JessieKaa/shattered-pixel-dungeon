@@ -39,6 +39,13 @@ final class ModTestSupport {
 		ModRegistry.resetForTests();
 		ModRegistry.scanDir(realModsHandle());
 		ModRegistry.setEnabled("test_mod", true);
+		// remished_lite is the only builtin mod with default_enabled=true (M13c showcase pack).
+		// A fresh FakePreferences leaves its pref unset, so isEnabled falls back to the manifest
+		// default (true) and it would auto-load alongside test_mod, inflating the exact-size
+		// assertions in ModToggleRegressionTest / LuaSpellTest / LuaMobTest / etc. Tests that
+		// exercise remished_lite directly use their own enable helper; every other test wants
+		// the historical "fresh prefs = all mods off" slate, so explicitly disable it here.
+		ModRegistry.setEnabled("remished_lite", false);
 	}
 
 	/** Drop every Lua registry the 7 {@code loadXxxScripts} methods populate, then drop the
