@@ -42,6 +42,7 @@ import com.badlogic.gdx.graphics.g2d.freetype.FreeType;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
 import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
+import com.shatteredpixel.shatteredpixeldungeon.modding.ModImporter;
 import com.shatteredpixel.shatteredpixeldungeon.services.news.News;
 import com.shatteredpixel.shatteredpixeldungeon.services.news.NewsImpl;
 import com.shatteredpixel.shatteredpixeldungeon.services.updates.UpdateImpl;
@@ -172,7 +173,11 @@ public class AndroidLauncher extends AndroidApplication {
 		support.updateSystemUI();
 
 		Button.longClick = ViewConfiguration.getLongPressTimeout()/1000f;
-		
+
+		// M12c: register the android SAF mod-zip picker so WndModManager shows its Import button.
+		// Static holder, idempotent write before the app starts; mirrors DesktopLauncher.
+		ModImporter.setPlatformImpl(new AndroidSafModImporter(this));
+
 		initialize(new ShatteredPixelDungeon(support), config);
 		
 	}
