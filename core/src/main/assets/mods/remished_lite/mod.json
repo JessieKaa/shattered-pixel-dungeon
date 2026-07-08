@@ -1,0 +1,10 @@
+{
+  "id": "remished_lite",
+  "name": "Remished Lite (内置展示包)",
+  "version": "0.1.0",
+  "spd_version": 896,
+  "author": "fork",
+  "default_enabled": true,
+  "entry": "entry.lua",
+  "description": "默认开启的内置展示包:一个可进入的 hub 关卡,内含 Lua NPC(对话/发放)、shop(买卖)、散落金币与 rat_king。注册的 item/spell/mob 是 registered-but-inert(Explore 证实 main game 不掉落/不刷/不入背包),仅经关卡内 NPC 接触 —— main game 原版不变(C3)。"
+}

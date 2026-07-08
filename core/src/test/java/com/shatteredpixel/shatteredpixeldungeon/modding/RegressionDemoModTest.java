@@ -88,6 +88,10 @@ public class RegressionDemoModTest {
     private void enableRegressionDemo() throws Exception {
         ModRegistry.scanDir(ModTestSupport.realModsHandle());
         ModRegistry.setEnabled("regression_demo", true);
+        // remished_lite is default_enabled=true (M13c); a fresh-prefs scan leaves it enabled and
+        // its item/spell/mob/npc/shop would register alongside regression_demo, breaking the
+        // exact-size assertions below. Disable it — this test targets regression_demo only.
+        ModRegistry.setEnabled("remished_lite", false);
     }
 
     // ---------------- enabled: full coverage matrix registers ----------------
@@ -196,6 +200,9 @@ public class RegressionDemoModTest {
     public void loadDisabled_registriesEmpty() throws Exception {
         // Scan but do NOT enable regression_demo (default_enabled=false).
         ModRegistry.scanDir(ModTestSupport.realModsHandle());
+        // remished_lite is default_enabled=true (M13c); disable it so the "all off → empty
+        // registries" baseline this test asserts actually holds.
+        ModRegistry.setEnabled("remished_lite", false);
 
         LuaEngine.init();
 
