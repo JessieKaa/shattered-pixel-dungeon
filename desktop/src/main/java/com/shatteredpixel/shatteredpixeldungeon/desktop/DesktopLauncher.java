@@ -31,6 +31,7 @@ import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
 import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
 import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
+import com.shatteredpixel.shatteredpixeldungeon.modding.ModImporter;
 import com.shatteredpixel.shatteredpixeldungeon.services.news.News;
 import com.shatteredpixel.shatteredpixeldungeon.services.news.NewsImpl;
 import com.shatteredpixel.shatteredpixeldungeon.services.updates.UpdateImpl;
@@ -188,6 +189,10 @@ public class DesktopLauncher {
 		
 		config.setWindowIcon("icons/icon_16.png", "icons/icon_32.png", "icons/icon_48.png",
 				"icons/icon_64.png", "icons/icon_128.png", "icons/icon_256.png");
+
+		// M12b: register the desktop mod-zip picker so WndModManager shows its Import button.
+		// Static holder, written once before the app starts; android registers its own in M12c.
+		ModImporter.setPlatformImpl(new DesktopModImporter());
 
 		new Lwjgl3Application(new ShatteredPixelDungeon(new DesktopPlatformSupport()), config);
 	}
