@@ -116,9 +116,19 @@ public abstract class RegularLevel extends Level {
 			}
 			rooms = builder.build((ArrayList<Room>)initRooms.clone());
 		} while (rooms == null);
-		
-		return painter().paint(this, rooms);
-		
+
+		// FORK(modding-M10b): route-A single-point injection. painter() is abstract
+		// and overridden by 8 subclasses, but build() is its only call site — so
+		// wrapping here is the true single-point hook (subclasses + upstream
+		// Room/Painter/Trap stay untouched). The adapter overlays Lua painters
+		// after the delegate's full upstream pipeline; vanilla (no painters
+		// registered) skips the wrap entirely.
+		com.shatteredpixel.shatteredpixeldungeon.levels.painters.Painter p = painter();
+		if (com.shatteredpixel.shatteredpixeldungeon.modding.LuaPainterRegistry.hasAny()) {
+			p = new com.shatteredpixel.shatteredpixeldungeon.modding.LuaPainterAdapter(p);
+		}
+		return p.paint(this, rooms);
+
 	}
 	
 	protected ArrayList<Room> initRooms() {
@@ -315,6 +325,11 @@ public abstract class RegularLevel extends Level {
 
 		// FORK(modding-M4d): inject Lua-defined town-portal NPCs (debug-gated, depth-routed).
 		com.shatteredpixel.shatteredpixeldungeon.modding.LuaLevelService.injectLevelNpcs(this);
+
+		// FORK(modding-M10b): inject Lua-defined traps (registry-gated, not debug-gated —
+		// M9 opened modding to release). Runs after buildFlagMaps, so placeLuaTraps
+		// refreshes per-cell flags via updateCellFlags.
+		com.shatteredpixel.shatteredpixeldungeon.modding.LuaLevelService.injectLevelTraps(this);
 
 	}
 

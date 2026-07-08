@@ -8,14 +8,18 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
+import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
 import com.watabou.noosa.Game;
 import com.watabou.utils.Bundle;
 import com.watabou.utils.Callback;
 import com.watabou.utils.DeviceCompat;
+import com.watabou.utils.Random;
+import org.luaj.vm2.LuaTable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 
 /**
  * Coordinates entering / leaving a {@link DataDrivenLevel} at runtime, and (M4d)
@@ -324,5 +328,68 @@ public final class LuaLevelService {
 			}
 		}
 		return -1;
+	}
+
+	// ---- M10b: Lua trap injection ----
+
+	/**
+	 * Inject Lua-defined traps into a freshly-built level. Called once from
+	 * {@code RegularLevel.createMobs} (the single upstream hook, right after
+	 * {@link #injectLevelNpcs}). Not debug-gated — M9 opened modding to release,
+	 * so the gate is purely {@link LuaTrapRegistry#hasAny()}: vanilla playthroughs
+	 * (no trap scripts loaded) hit the early return and see zero behavioural
+	 * change. Skips {@link DataDrivenLevel} (those own their trap layout).
+	 *
+	 * <p>Runs after {@code buildFlagMaps()} (Level.create: build→buildFlagMaps→
+	 * createMobs), so each placed trap must call {@link Level#updateCellFlags} to
+	 * refresh the {@code secret[]} flag hidden-trap search reads — writing
+	 * {@code map[pos]=SECRET_TRAP} alone would leave stale EMPTY flags. Never
+	 * calls 2-arg {@code Level.set(cell,terrain)}: that resolves {@code Dungeon.level},
+	 * which is still null here (assigned only at Dungeon.java:490, after create()).
+	 *
+	 * <p>Candidates are EMPTY cells with no mob/heap/plant/trap and not the
+	 * entrance/exit. Upstream paintTraps already flipped its trap cells to
+	 * TRAP/SECRET_TRAP, so the EMPTY filter structurally avoids collisions.
+	 */
+	public static void injectLevelTraps(Level level) {
+		if (level == null) return;
+		if (level instanceof DataDrivenLevel) return;
+		if (!LuaTrapRegistry.hasAny()) return;
+		placeLuaTraps(level);
+	}
+
+	/**
+	 * Place up to {@code min(registrySize, validCells/5)} Lua traps (density cap
+	 * mirrors {@code RegularPainter.paintTraps}). Package-visible for direct
+	 * headless testing without the isDebug/registry gate.
+	 */
+	static void placeLuaTraps(Level level) {
+		ArrayList<Integer> valid = new ArrayList<>();
+		int entrance = level.entrance();
+		int exit = level.exit();
+		for (int i = 0; i < level.length(); i++) {
+			if (level.map[i] != Terrain.EMPTY) continue;
+			if (i == entrance || i == exit) continue;
+			if (level.findMob(i) != null) continue;
+			if (level.heaps.get(i) != null) continue;
+			if (level.plants.get(i) != null) continue;
+			if (level.traps.get(i) != null) continue;
+			valid.add(i);
+		}
+		if (valid.isEmpty()) return;
+		int budget = Math.min(LuaTrapRegistry.size(), valid.size() / 5);
+		if (budget <= 0) return;
+		ArrayList<String> ids = new ArrayList<>(LuaTrapRegistry.ids());
+		for (int i = 0; i < budget; i++) {
+			String id = ids.get(i % ids.size());
+			LuaTable tbl = LuaTrapRegistry.getTable(id);
+			if (tbl == null) continue;
+			LuaTrap trap = new LuaTrap(tbl);
+			int pos = valid.remove(Random.Int(valid.size()));
+			level.setTrap(trap, pos);      // GameScene.updateMap no-ops here (scene null)
+			trap.hide();
+			level.map[pos] = Terrain.SECRET_TRAP;
+			level.updateCellFlags(pos);    // refresh secret/passable/solid for this cell
+		}
 	}
 }

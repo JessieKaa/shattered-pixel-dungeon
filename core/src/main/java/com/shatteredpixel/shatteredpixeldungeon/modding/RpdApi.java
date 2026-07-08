@@ -54,6 +54,7 @@ import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.items.armor.Armor;
 import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfTeleportation;
 import com.shatteredpixel.shatteredpixeldungeon.items.weapon.Weapon;
+import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
 import com.shatteredpixel.shatteredpixeldungeon.mechanics.Ballistica;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
@@ -225,7 +226,40 @@ final class RpdApi {
         rpd.set("addShield", new AddShield());
         rpd.set("charShield", new CharShield());
         rpd.set("absorbShield", new AbsorbShield());
+        // M10b: Terrain constants for Lua painter scripts (setTile target ints).
+        // Only the decorative subset Lua painters are allowed to set is exposed —
+        // the adapter's setTile gate rejects anything outside this whitelist, but
+        // exposing the full enum would mislead script authors. Plus a few
+        // read-only reference constants (WALL/DOOR/WATER/GRASS/TRAP) so scripts
+        // can branch on level.tileAt(cell) without magic numbers.
+        rpd.set("Terrain", terrainConstants());
         return rpd;
+    }
+
+    /**
+     * M10b: {@code RPD.Terrain} — int constants for Lua painter scripts. Combines
+     * the writable decorative subset (EMPTY/EMPTY_DECO/EMPTY_SP/EMBERS, matching
+     * {@link LuaPainterAdapter}'s target whitelist) with read-only reference
+     * constants scripts use to inspect existing tiles. WALL_DECO is deliberately
+     * NOT in the writable subset: its flags equal WALL (SOLID|LOS_BLOCKING).
+     */
+    private static LuaTable terrainConstants() {
+        LuaTable t = new LuaTable();
+        t.set("EMPTY", LuaValue.valueOf(Terrain.EMPTY));
+        t.set("EMPTY_DECO", LuaValue.valueOf(Terrain.EMPTY_DECO));
+        t.set("EMPTY_SP", LuaValue.valueOf(Terrain.EMPTY_SP));
+        t.set("EMBERS", LuaValue.valueOf(Terrain.EMBERS));
+        // read-only references
+        t.set("WALL", LuaValue.valueOf(Terrain.WALL));
+        t.set("WALL_DECO", LuaValue.valueOf(Terrain.WALL_DECO));
+        t.set("DOOR", LuaValue.valueOf(Terrain.DOOR));
+        t.set("WATER", LuaValue.valueOf(Terrain.WATER));
+        t.set("GRASS", LuaValue.valueOf(Terrain.GRASS));
+        t.set("HIGH_GRASS", LuaValue.valueOf(Terrain.HIGH_GRASS));
+        t.set("FURROWED_GRASS", LuaValue.valueOf(Terrain.FURROWED_GRASS));
+        t.set("TRAP", LuaValue.valueOf(Terrain.TRAP));
+        t.set("SECRET_TRAP", LuaValue.valueOf(Terrain.SECRET_TRAP));
+        return t;
     }
 
     /** Resolve a Lua-passed char id to a live Char, or null (logged) if missing/wrong type. */
