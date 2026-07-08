@@ -117,7 +117,7 @@ public final class LuaLevelService {
 		try {
 			Dungeon.saveAll();
 
-			DataDrivenLevel level = DataDrivenLevel.fromAsset(LEVELS_DIR + id + ".json", id);
+			DataDrivenLevel level = loadLevelById(id);
 			if (level == null) {
 				Gdx.app.error(TAG, "enterLevel: could not load level '" + id + "'");
 				return;
@@ -138,6 +138,37 @@ public final class LuaLevelService {
 		} catch (Exception e) {
 			Gdx.app.error(TAG, "enterLevel failed", e);
 		}
+	}
+
+	/**
+	 * Resolve a level id to a {@link DataDrivenLevel} by origin (M12d). An <em>external</em> mod
+	 * registration (origin == EXTERNAL with a live {@code baseDir}) reads the json from
+	 * {@code baseDir.child(...)} via {@link DataDrivenLevel#fromFileHandle}; anything else — an
+	 * unregistered id (the builtin {@code test_safezone} path), a builtin mod registration, or a
+	 * {@code register_level} fired outside any mod context — falls through to the original
+	 * classpath {@link DataDrivenLevel#fromAsset} lookup, so builtin behaviour is unchanged.
+	 *
+	 * <p>Discriminating on {@code origin == EXTERNAL} (not bare {@code baseDir != null}) is load-
+	 * bearing: builtin mods also carry a non-null {@code baseDir} (a classpath handle), and routing
+	 * them through {@code baseDir.child()} would change how builtin levels resolve. The extra
+	 * {@code baseDir != null} check is NPE defence. An explicit {@code path} (when present)
+	 * overrides the per-origin default ({@code levels/<id>.json} for external, the shared
+	 * {@code mods/levels/<id>.json} classpath path for builtin).
+	 *
+	 * <p>Returns null on any load failure (missing file, bad json) — {@link #enterLevel}'s null
+	 * check logs and stays on the current level, matching the pre-M12d builtin failure behaviour.
+	 */
+	private static DataDrivenLevel loadLevelById(String id) {
+		LuaLevelRegistry.Entry entry = LuaLevelRegistry.get(id);
+		if (entry != null
+				&& entry.origin == ModManifest.Origin.EXTERNAL
+				&& entry.baseDir != null) {
+			String rel = entry.path != null ? entry.path : "levels/" + id + ".json";
+			return DataDrivenLevel.fromFileHandle(entry.baseDir.child(rel), id);
+		}
+		String classpath = (entry != null && entry.path != null)
+				? entry.path : LEVELS_DIR + id + ".json";
+		return DataDrivenLevel.fromAsset(classpath, id);
 	}
 
 	/**

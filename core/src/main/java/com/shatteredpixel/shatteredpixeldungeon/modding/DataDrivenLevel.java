@@ -1,6 +1,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
 import com.shatteredpixel.shatteredpixeldungeon.Assets;
@@ -136,16 +137,29 @@ public class DataDrivenLevel extends Level {
 		return lvl;
 	}
 
-	/** Convenience: read a JSON file from {@code assets} and parse it. */
-	public static DataDrivenLevel fromAsset(String path, String id) {
+	/**
+	 * Read a JSON level definition from a {@link FileHandle} and parse it via
+	 * {@link #fromJsonValue}, which enforces the same structural validation for builtin and
+	 * external sources (width/height &gt; 0, tiles length == width*height, entrance in bounds).
+	 * M12d: the external-mod load path ({@link LuaLevelService#enterLevel}) reads an external
+	 * mod's level json from {@code mods_user/<modId>/levels/<id>.json} through this method, so
+	 * external json is held to the <em>same</em> validation as builtin — nothing is relaxed.
+	 * Returns null on any failure so the caller can log and stay on the current level.
+	 */
+	public static DataDrivenLevel fromFileHandle(FileHandle fh, String id) {
 		try {
-			String text = Gdx.files.internal(path).readString("UTF-8");
+			String text = fh.readString("UTF-8");
 			JsonValue root = new JsonReader().parse(text);
 			return fromJsonValue(root, id);
 		} catch (Exception e) {
-			Gdx.app.error(TAG, "failed to load level asset " + path, e);
+			Gdx.app.error(TAG, "failed to load level file " + fh.path(), e);
 			return null;
 		}
+	}
+
+	/** Convenience: read a JSON level from a classpath {@code assets} path and parse it. */
+	public static DataDrivenLevel fromAsset(String path, String id) {
+		return fromFileHandle(Gdx.files.internal(path), id);
 	}
 
 	@Override

@@ -59,6 +59,17 @@ public class LuaEngine implements ResourceFinder {
 	 */
 	private static Set<String> activeEnabledModIds = Collections.emptySet();
 
+	/**
+	 * The mod whose entry script is currently executing (M12d), so {@code register_level} can
+	 * capture its {@link ModManifest.Origin origin}/{@link ModManifest#baseDir baseDir} and file
+	 * an external level under its own {@code baseDir}. Null outside {@link #loadModEntryScripts}'s
+	 * per-mod try/finally, so a {@code register_level} fired from global {@code init.lua} (or any
+	 * non-mod context) registers with null origin/baseDir and {@code enterLevel} falls back to the
+	 * builtin classpath path. Static because {@code LuaEngine} is a singleton and
+	 * {@code RegisterLevelFunction} is a static inner class.
+	 */
+	static ModManifest currentMod;
+
 	private LuaEngine() { }
 
 	public static synchronized LuaEngine instance() {
@@ -364,15 +375,24 @@ public class LuaEngine implements ResourceFinder {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
 			if (mod.entry == null || mod.entry.isEmpty()) continue;
+			// M12d: expose this mod's origin/baseDir to register_level calls inside its entry
+			// script. try/finally guarantees currentMod is cleared even on continue/throw, so one
+			// mod's baseDir can never leak into a later mod's register_level (which would silently
+			// file the later mod's level under the wrong directory).
+			currentMod = mod;
 			String chunk = "mod:" + mod.id + ":" + mod.entry;
-			try (InputStream in = openModEntryStream(mod)) {
-				if (in == null) {
-					Gdx.app.error(TAG, "mod " + mod.id + " entry not found: " + chunk);
-					continue;
+			try {
+				try (InputStream in = openModEntryStream(mod)) {
+					if (in == null) {
+						Gdx.app.error(TAG, "mod " + mod.id + " entry not found: " + chunk);
+						continue;
+					}
+					globals.load(new InputStreamReader(in, "UTF-8"), chunk).call();
 				}
-				globals.load(new InputStreamReader(in, "UTF-8"), chunk).call();
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "mod " + mod.id + " entry load failed: " + chunk, e);
+			} finally {
+				currentMod = null;
 			}
 		}
 	}
@@ -848,9 +868,16 @@ public class LuaEngine implements ResourceFinder {
 	 * The {@code register_level(table)} global handed to Lua (M4a). Mirrors the other
 	 * register_* globals but lighter: a level is a JSON-file-backed {@link DataDrivenLevel},
 	 * so the Lua table only carries metadata — required {@code id}/{@code name}, optional
-	 * {@code path} (defaults to {@code mods/levels/<id>.json}, consumed by LuaLevelService).
+	 * {@code path} (resolved per-origin at load time by {@link LuaLevelService#enterLevel}).
 	 * The table is registered as-is so {@link DataDrivenLevel#restoreFromBundle} can
 	 * re-hydrate via {@link LuaLevelRegistry} (R3).
+	 *
+	 * <p>M12d: also captures the registering mod's {@link ModManifest.Origin}/
+	 * {@link ModManifest#baseDir} from {@link #currentMod}, so an <em>external</em> mod's
+	 * level resolves under {@code baseDir.child(...)} instead of the classpath
+	 * {@code mods/levels/} dir. {@code id} and an explicit {@code path} are validated before
+	 * registration — both are interpolated into a file read against the writable
+	 * {@code mods_user/} FS, so they must reject {@code ..}/absolute/backslash traversal.
 	 */
 	private static class RegisterLevelFunction extends OneArgFunction {
 		@Override
@@ -863,13 +890,49 @@ public class LuaEngine implements ResourceFinder {
 				LuaTable tbl = arg.checktable();
 				String id = tbl.get("id").checkjstring();
 				tbl.get("name").checkjstring();
-				// path optional; default resolved at load time.
-				tbl.get("path").optjstring("mods/levels/" + id + ".json");
-				LuaLevelRegistry.register(id, tbl);
+				// path optional; null = per-origin default resolved at load time.
+				String path = tbl.get("path").optjstring(null);
+				validateLevelId(id);
+				if (path != null) validateLevelPath(path);
+				ModManifest mod = LuaEngine.currentMod;
+				LuaLevelRegistry.register(id, tbl,
+						mod != null ? mod.origin : null,
+						mod != null ? mod.baseDir : null,
+						path);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_level rejected a malformed definition", e);
 			}
 			return NIL;
+		}
+	}
+
+	/** Level id must match the mod-id charset — it is interpolated into a file path at load time
+	 *  (external mods read {@code baseDir.child("levels/<id>.json")}), so it must reject the
+	 *  traversal characters that {@link ModManifest.ID_PATTERN} excludes. */
+	private static void validateLevelId(String id) {
+		if (id == null || !ModManifest.ID_PATTERN.matcher(id).matches()) {
+			throw new IllegalArgumentException("invalid level id: " + id);
+		}
+	}
+
+	/** Explicit level path must be a relative, traversal-free {@code .json} path (mirrors
+	 *  {@link ModManifest}'s entry-path validation but {@code .json} instead of {@code .lua}).
+	 *  External mods resolve it via {@code baseDir.child(path)}, so an absolute path or a
+	 *  {@code ..} segment would escape the mod directory. */
+	private static void validateLevelPath(String path) {
+		if (!path.endsWith(".json")) {
+			throw new IllegalArgumentException("level path must end with .json, got: " + path);
+		}
+		if (path.startsWith("/")) {
+			throw new IllegalArgumentException("level path must be relative (no leading /): " + path);
+		}
+		if (path.indexOf('\\') >= 0) {
+			throw new IllegalArgumentException("level path must not contain backslashes: " + path);
+		}
+		for (String seg : path.split("/")) {
+			if ("..".equals(seg)) {
+				throw new IllegalArgumentException("level path must not contain '..' segments: " + path);
+			}
 		}
 	}
 
