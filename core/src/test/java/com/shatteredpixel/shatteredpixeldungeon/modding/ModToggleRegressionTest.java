@@ -142,7 +142,7 @@ public class ModToggleRegressionTest {
 		assertTrue("M8d1 mod_example talent registered", LuaTalentRegistry.isKnownModTalent("MOD_EXAMPLE_TALENT"));
 
 		// Exact sizes: catches a missing/misnamed script that ID-checks alone could miss.
-		assertEquals("10 item dir scripts + 1 entry item", 11, LuaItemRegistry.size());
+		assertEquals("10 item dir scripts + 15 M10a item dir scripts + 1 entry item", 26, LuaItemRegistry.size());
 		assertEquals("test_mob + M6a PoC + 6 M6b PoC mobs", 8, LuaMobRegistry.size());
 		assertEquals(1, LuaAllyRegistry.size());
 		assertEquals(1, LuaHeroRegistry.size());
