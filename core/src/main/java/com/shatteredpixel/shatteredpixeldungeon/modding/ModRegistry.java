@@ -32,6 +32,16 @@ public final class ModRegistry {
 		scanFrom(ModScanner.scanDir(baseDir));
 	}
 
+	/**
+	 * Test seam mirroring {@link #scanDir} for external mods (M12a): seeds the registry from an
+	 * external {@code mods_user/}-style directory so {@link LuaEngine}'s external-loading path can
+	* be exercised headlessly without a real {@code Gdx.files.local} mount. Production scans external
+	 * mods via {@link ModScanner#scan()}; this seam exists only for tests.
+	 */
+	static synchronized void scanExternal(FileHandle baseDir) {
+		scanFrom(ModScanner.scanExternal(baseDir));
+	}
+
 	private static synchronized void scanFrom(List<ModManifest> result) {
 		scanned = result;
 		initialized = true;

@@ -49,9 +49,13 @@ public class WndModManager extends Window {
 		TXT_ZH.put("title", "模组管理");
 		TXT_ZH.put("empty", "未发现模组。");
 		TXT_ZH.put("hint", "更改在重启游戏后生效。");
+		TXT_ZH.put("origin_builtin", "[内建]");
+		TXT_ZH.put("origin_external", "[外部]");
 		TXT_EN.put("title", "Mods");
 		TXT_EN.put("empty", "No mods found.");
 		TXT_EN.put("hint", "Changes apply after restart.");
+		TXT_EN.put("origin_builtin", "[built-in]");
+		TXT_EN.put("origin_external", "[external]");
 	}
 
 	private static String txt(String key) {
@@ -119,8 +123,15 @@ public class WndModManager extends Window {
 		private final String modId;
 
 		ModCheckBox(ModManifest mod) {
-			super(mod.name + " v" + mod.version);
+			super(mod.name + " v" + mod.version + " " + originTag(mod));
 			this.modId = mod.id;
+		}
+
+		/** M12a: localized origin badge so players can tell packaged mods from external ones.
+		 *  Null origin (un-scanned manifest) renders as builtin — the safe default. */
+		private static String originTag(ModManifest mod) {
+			boolean external = mod.origin == ModManifest.Origin.EXTERNAL;
+			return txt(external ? "origin_external" : "origin_builtin");
 		}
 
 		@Override

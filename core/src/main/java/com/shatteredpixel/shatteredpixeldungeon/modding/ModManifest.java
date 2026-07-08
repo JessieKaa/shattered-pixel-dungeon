@@ -1,5 +1,6 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.JsonValue;
 
 import java.util.Collections;
@@ -19,6 +20,13 @@ import java.util.regex.Pattern;
 public final class ModManifest {
 
 	private static final Pattern ID_PATTERN = Pattern.compile("^[a-z0-9_]+$");
+
+	/**
+	 * Where a mod was discovered (M12a). Determines how {@link LuaEngine} loads its scripts:
+	 * builtin mods are resolved through the classpath double-channel; external mods are resolved
+	 * purely through their {@link #baseDir} {@link FileHandle}.
+	 */
+	public enum Origin { BUILTIN, EXTERNAL }
 
 	public final String id;
 	public final String name;
@@ -43,6 +51,25 @@ public final class ModManifest {
 	 * by {@link ModRegistry} for enabled mods at scan/enable time.
 	 */
 	public final Map<String, Double> balance;
+
+	/**
+	 * Where the mod was discovered (M12a). {@link Origin#BUILTIN} = packaged in
+	 * {@code assets/mods/} (classpath/internal); {@link Origin#EXTERNAL} = dropped into the
+	 * writable {@code mods_user/} dir. Set by {@link ModScanner} after {@link #fromJson}; null on
+	 * a freshly-parsed manifest that the scanner has not yet annotated. Runtime-only — never
+	 * serialized (a {@link ModManifest} is not Bundle-persisted; it is reparsed from {@code mod.json}
+	 * each launch).
+	 */
+	public Origin origin;
+
+	/**
+	 * This mod's own directory as a {@link FileHandle} (M12a). For builtin mods this is the
+	 * {@code mods/<id>} classpath/internal handle; for external mods it is the
+	 * {@code mods_user/<id>} local handle. {@link LuaEngine}'s loaders use it to locate scripts
+	 * without a hardcoded {@code mods/} prefix. Runtime-only — never serialized (same reason as
+	 * {@link #origin}). Set by {@link ModScanner} via {@link #setRuntimeMeta}.
+	 */
+	public FileHandle baseDir;
 
 	private ModManifest(String id, String name, String version, int spdVersion,
 	                    String author, boolean defaultEnabled, String description, String entry,
@@ -98,6 +125,16 @@ public final class ModManifest {
 		Map<String, Double> balance = parseBalance(v.get("balance"));
 
 		return new ModManifest(id, name, version, spdVersion, author, defaultEnabled, description, entry, balance);
+	}
+
+	/**
+	 * Annotate a freshly-parsed manifest with its discovery origin + base directory (M12a). Called
+	 * by {@link ModScanner} once per admitted mod, immediately after {@link #fromJson}. These are
+	 * runtime-only fields — they carry no {@code mod.json} representation and are never serialized.
+	 */
+	public void setRuntimeMeta(Origin origin, FileHandle baseDir) {
+		this.origin = origin;
+		this.baseDir = baseDir;
 	}
 
 	/**

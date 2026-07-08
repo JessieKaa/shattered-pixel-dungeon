@@ -31,6 +31,11 @@ import java.util.Set;
  * contributes zero Lua content — the C3 regression baseline (vanilla playthrough
  * loads no Lua content when every mod is {@code default_enabled=false}).
  *
+ * <p>M12a: script directories are resolved from {@link ModManifest#baseDir} rather than a
+ * hardcoded {@code mods/} prefix, so an external mod (discovered under the writable
+ * {@code mods_user/} dir) loads its scripts the same way. Builtin mods keep the M9 classpath
+ * double-channel; external mods resolve purely through their {@link com.badlogic.gdx.files.FileHandle}.
+ *
  * <p>Exposes a single {@code register_item(table)} global so Lua scripts can hand
  * item definitions to Java, and runs {@code scripts/init.lua} once on game start
  * for any pure-Lua bootstrap (init.lua must not rely on dofile).
@@ -207,7 +212,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadItemScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/items", "Lua items (" + mod.id + ")", LuaItemRegistry::size);
+			loadScriptsFrom(mod, "scripts/items", "Lua items (" + mod.id + ")", LuaItemRegistry::size);
 		}
 	}
 
@@ -219,7 +224,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadMobScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/mobs", "Lua mobs (" + mod.id + ")", LuaMobRegistry::size);
+			loadScriptsFrom(mod, "scripts/mobs", "Lua mobs (" + mod.id + ")", LuaMobRegistry::size);
 		}
 	}
 
@@ -231,7 +236,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadAllyScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/allies", "Lua allies (" + mod.id + ")", LuaAllyRegistry::size);
+			loadScriptsFrom(mod, "scripts/allies", "Lua allies (" + mod.id + ")", LuaAllyRegistry::size);
 		}
 	}
 
@@ -245,7 +250,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadHeroScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/heroes", "Lua heroes (" + mod.id + ")", LuaHeroRegistry::size);
+			loadScriptsFrom(mod, "scripts/heroes", "Lua heroes (" + mod.id + ")", LuaHeroRegistry::size);
 		}
 	}
 
@@ -258,7 +263,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadSpellScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/spells", "Lua spells (" + mod.id + ")", LuaSpellRegistry::size);
+			loadScriptsFrom(mod, "scripts/spells", "Lua spells (" + mod.id + ")", LuaSpellRegistry::size);
 		}
 	}
 
@@ -271,7 +276,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadNpcScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/npcs", "Lua npcs (" + mod.id + ")", LuaNpcRegistry::size);
+			loadScriptsFrom(mod, "scripts/npcs", "Lua npcs (" + mod.id + ")", LuaNpcRegistry::size);
 		}
 	}
 
@@ -284,7 +289,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadShopScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/shops", "Lua shops (" + mod.id + ")", LuaShopRegistry::size);
+			loadScriptsFrom(mod, "scripts/shops", "Lua shops (" + mod.id + ")", LuaShopRegistry::size);
 		}
 	}
 
@@ -298,7 +303,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadBuffScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/buffs", "Lua buffs (" + mod.id + ")", LuaBuffRegistry::size);
+			loadScriptsFrom(mod, "scripts/buffs", "Lua buffs (" + mod.id + ")", LuaBuffRegistry::size);
 		}
 	}
 
@@ -312,7 +317,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadTalentScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/talents", "Lua talent overrides (" + mod.id + ")", LuaTalentOverride::size);
+			loadScriptsFrom(mod, "scripts/talents", "Lua talent overrides (" + mod.id + ")", LuaTalentOverride::size);
 		}
 	}
 
@@ -326,7 +331,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadPainterScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/painters", "Lua painters (" + mod.id + ")", LuaPainterRegistry::size);
+			loadScriptsFrom(mod, "scripts/painters", "Lua painters (" + mod.id + ")", LuaPainterRegistry::size);
 		}
 	}
 
@@ -338,7 +343,7 @@ public class LuaEngine implements ResourceFinder {
 	private void loadTrapScripts() {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
-			loadScriptsFrom("mods/" + mod.id + "/scripts/traps", "Lua traps (" + mod.id + ")", LuaTrapRegistry::size);
+			loadScriptsFrom(mod, "scripts/traps", "Lua traps (" + mod.id + ")", LuaTrapRegistry::size);
 		}
 	}
 
@@ -359,36 +364,57 @@ public class LuaEngine implements ResourceFinder {
 		for (ModManifest mod : ModRegistry.all()) {
 			if (!ModRegistry.isEnabled(mod.id)) continue;
 			if (mod.entry == null || mod.entry.isEmpty()) continue;
-			String path = "mods/" + mod.id + "/" + mod.entry;
-			String chunkName = "mod:" + mod.id + ":" + mod.entry;
-			try (InputStream in = findResource(path)) {
+			String chunk = "mod:" + mod.id + ":" + mod.entry;
+			try (InputStream in = openModEntryStream(mod)) {
 				if (in == null) {
-					Gdx.app.error(TAG, "mod " + mod.id + " entry not found: " + path);
+					Gdx.app.error(TAG, "mod " + mod.id + " entry not found: " + chunk);
 					continue;
 				}
-				globals.load(new InputStreamReader(in, "UTF-8"), chunkName).call();
+				globals.load(new InputStreamReader(in, "UTF-8"), chunk).call();
 			} catch (Exception e) {
-				Gdx.app.error(TAG, "mod " + mod.id + " entry load failed: " + path, e);
+				Gdx.app.error(TAG, "mod " + mod.id + " entry load failed: " + chunk, e);
 			}
 		}
 	}
 
+	/** Open a mod entry script by origin (M12a). External reads {@code baseDir.child(entry)}
+	 *  directly; builtin keeps {@link #findResource} on the {@code mods/<id>/<entry>} classpath path.
+	 *  Null if the entry file is absent (caller logs + continues). */
+	private InputStream openModEntryStream(ModManifest mod) {
+		if (mod.origin == ModManifest.Origin.EXTERNAL && mod.baseDir != null) {
+			try {
+				FileHandle f = mod.baseDir.child(mod.entry);
+				if (f.exists()) return f.read();
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "mod entry open external " + mod.entry + " failed", e);
+			}
+			return null;
+		}
+		return findResource("mods/" + mod.id + "/" + mod.entry);
+	}
+
 	/**
 	 * Shared loader for item/mob script directories. Compiles each {@code *.lua}
-	 * file in {@code dir} via the host-side {@code Globals.load} (sandbox-safe —
-	 * Lua-side {@code dofile} is stripped). Per-file errors are logged, never
-	 * fatal. {@code registrySize} is used only for the "nothing registered" warning.
+	 * file under {@code <mod baseDir>/<subdir>} via the host-side {@code Globals.load}
+	 * (sandbox-safe — Lua-side {@code dofile} is stripped). Per-file errors are logged,
+	 * never fatal. {@code registrySize} is used only for the "nothing registered" warning.
+	 *
+	 * <p>M12a: {@code mod} + {@code subdir} replace the old hardcoded {@code "mods/<id>/..."}
+	 * path string. Builtin mods keep the M9 classpath double-channel ({@link #listBuiltinScriptNames});
+	 * external mods resolve purely through {@code mod.baseDir} (a real {@link FileHandle}, so
+	 * {@code list()}/{@code read()} are reliable without any classpath entry).
 	 */
-	private void loadScriptsFrom(String dir, String label, java.util.function.IntSupplier registrySize) {
-		String[] names = listScriptNames(dir);
+	private void loadScriptsFrom(ModManifest mod, String subdir, String label, java.util.function.IntSupplier registrySize) {
+		String[] names = listScriptNames(mod, subdir);
+		String base = chunkPath(mod, subdir);
 		if (names.length == 0) {
-			Gdx.app.error(TAG, dir + " contains no .lua files; no " + label + " registered");
+			Gdx.app.error(TAG, base + " contains no .lua files; no " + label + " registered");
 			return;
 		}
 		java.util.Arrays.sort(names);
 		for (String n : names) {
-			String path = dir + "/" + n;
-			try (InputStream in = findResource(path)) {
+			String path = base + "/" + n;
+			try (InputStream in = openScriptStream(mod, subdir, n)) {
 				if (in == null) {
 					Gdx.app.error(TAG, "Script " + path + " could not be opened");
 					continue;
@@ -399,16 +425,73 @@ public class LuaEngine implements ResourceFinder {
 			}
 		}
 		if (registrySize.getAsInt() == 0) {
-			Gdx.app.error(TAG, "No " + label + " registered after scanning " + dir);
+			Gdx.app.error(TAG, "No " + label + " registered after scanning " + base);
 		}
 	}
 
 	/**
-	 * Lists {@code *.lua} filenames under a scripts directory.
+	 * List {@code *.lua} filenames under {@code <mod baseDir>/<subdir>} (M12a). External mods list
+	 * their real {@link FileHandle} directory directly; builtin mods fall back to the classpath
+	 * double-channel (an internal {@code mods/<id>/scripts/...} dir that exists only on the classpath
+	 * returns an empty array from {@code list()}, which would silently load zero scripts — hence
+	 * the classpath-first stage preserved for builtin).
+	 */
+	private String[] listScriptNames(ModManifest mod, String subdir) {
+		if (mod.origin == ModManifest.Origin.EXTERNAL && mod.baseDir != null) {
+			return listExternalScriptNames(mod.baseDir, subdir);
+		}
+		return listBuiltinScriptNames("mods/" + mod.id + "/" + subdir);
+	}
+
+	private String[] listExternalScriptNames(FileHandle baseDir, String subdir) {
+		try {
+			FileHandle dir = baseDir.child(subdir);
+			if (!dir.exists() || !dir.isDirectory()) return new String[0];
+			FileHandle[] kids = dir.list();
+			java.util.List<String> out = new java.util.ArrayList<>();
+			for (FileHandle k : kids) {
+				if (k.name().endsWith(".lua")) out.add(k.name());
+			}
+			return out.toArray(new String[0]);
+		} catch (Exception e) {
+			Gdx.app.error(TAG, "External script enumeration of " + baseDir.path() + "/" + subdir + " failed", e);
+			return new String[0];
+		}
+	}
+
+	/** Open a script stream by origin. External reads the {@link FileHandle} directly; builtin
+	 *  keeps {@link #findResource} (classpath/internal). Null if the file is absent. */
+	private InputStream openScriptStream(ModManifest mod, String subdir, String name) {
+		if (mod.origin == ModManifest.Origin.EXTERNAL && mod.baseDir != null) {
+			try {
+				FileHandle f = mod.baseDir.child(subdir).child(name);
+				if (f.exists()) return f.read();
+			} catch (Exception e) {
+				Gdx.app.error(TAG, "openScriptStream external " + name + " failed", e);
+			}
+			return null;
+		}
+		return findResource("mods/" + mod.id + "/" + subdir + "/" + name);
+	}
+
+	/** Human-readable base path for a mod script dir, used for log messages and Lua chunk names.
+	 *  Reflects where the scripts physically live (builtin classpath vs external FS). */
+	private String chunkPath(ModManifest mod, String subdir) {
+		if (mod.origin == ModManifest.Origin.EXTERNAL && mod.baseDir != null) {
+			return mod.baseDir.path() + "/" + subdir;
+		}
+		return "mods/" + mod.id + "/" + subdir;
+	}
+
+	/**
+	 * Lists {@code *.lua} filenames under a builtin scripts directory.
 	 * Stage 1: classpath-as-filesystem (works in tests + unpacked desktop runs).
 	 * Stage 2: libgdx {@code FileHandle.list()} (Android AssetManager, packaged jars).
+	 *
+	 * <p>Preserved unchanged from the pre-M12a implementation — this is the M9 LWJGL3 classpath
+	 * double-channel fix; builtin mods break if either stage is removed.
 	 */
-	private String[] listScriptNames(String dir) {
+	private String[] listBuiltinScriptNames(String dir) {
 		try {
 			java.net.URL dirUrl = LuaEngine.class.getClassLoader().getResource(dir);
 			if (dirUrl != null && "file".equals(dirUrl.getProtocol())) {

@@ -32,6 +32,7 @@ public final class ModScanner {
 
 	private static final String TAG = "ModScanner";
 	private static final String MANIFEST_NAME = "mod.json";
+	private static final String EXTERNAL_MODS_DIR = "mods_user/";
 
 	private ModScanner() {}
 
@@ -40,7 +41,62 @@ public final class ModScanner {
 			safeLog(TAG, "Gdx.files null, mod scan skipped", null);
 			return Collections.emptyList();
 		}
-		return scanChildren(listModDirs());
+		List<ModManifest> builtin = scanChildren(listModDirs(), ModManifest.Origin.BUILTIN);
+		List<ModManifest> external = scanExternal(externalModsRoot());
+		return mergeById(builtin, external);
+	}
+
+	/**
+	 * Resolve the external mods root as a writable {@link FileHandle} (M12a). Uses
+	 * {@link Gdx.Files#local(String)} (Android {@code getFilesDir()} / desktop cwd) so no storage
+	 * permission is required. Returns null if libgdx cannot resolve a local root (e.g. misconfigured
+	 * headless launch); {@link #scanExternal(FileHandle)} treats null as "no external mods".
+	 */
+	private static FileHandle externalModsRoot() {
+		try {
+			return Gdx.files.local(EXTERNAL_MODS_DIR);
+		} catch (Exception e) {
+			safeLog(TAG, "Gdx.files.local(" + EXTERNAL_MODS_DIR + ") failed, external mods skipped", e);
+			return null;
+		}
+	}
+
+	/**
+	 * Scan {@code baseDir} (the external {@code mods_user/} root) for external mods (M12a). Each
+	 * admitted manifest is annotated {@link ModManifest.Origin#EXTERNAL} with {@code baseDir} set
+	 * to its own {@code mods_user/<id>} directory. Missing/null base dir → empty list (a brand-new
+	 * install has no {@code mods_user/} yet; it is created on first import, which is M12b/c).
+	 */
+	static List<ModManifest> scanExternal(FileHandle baseDir) {
+		if (baseDir == null || !baseDir.exists()) return Collections.emptyList();
+		return scanChildren(baseDir.list(), ModManifest.Origin.EXTERNAL);
+	}
+
+	/**
+	 * Merge builtin + external scan results, builtin-wins on id conflict (M12a). Builtin mods are
+	 * kept in full; an external mod whose id collides with a builtin is skipped + logged (never
+	 * throws) so a stale external copy cannot shadow the packaged version. Distinct external ids
+	 * are appended after builtin (scan order: builtin first, then external).
+	 */
+	static List<ModManifest> mergeById(List<ModManifest> builtin, List<ModManifest> external) {
+		List<ModManifest> out = new ArrayList<>(builtin.size() + (external == null ? 0 : external.size()));
+		Set<String> seen = new HashSet<>();
+		if (builtin != null) {
+			for (ModManifest m : builtin) {
+				out.add(m);
+				seen.add(m.id);
+			}
+		}
+		if (external != null) {
+			for (ModManifest m : external) {
+				if (!seen.add(m.id)) {
+					safeLog(TAG, "external mod " + m.id + " shadowed by builtin, skip", null);
+					continue;
+				}
+				out.add(m);
+			}
+		}
+		return out;
 	}
 
 	/**
@@ -85,10 +141,10 @@ public final class ModScanner {
 		if (baseDir == null || !baseDir.exists()) {
 			return Collections.emptyList();
 		}
-		return scanChildren(baseDir.list());
+		return scanChildren(baseDir.list(), ModManifest.Origin.BUILTIN);
 	}
 
-	private static List<ModManifest> scanChildren(FileHandle[] rawChildren) {
+	private static List<ModManifest> scanChildren(FileHandle[] rawChildren, ModManifest.Origin origin) {
 		if (rawChildren == null || rawChildren.length == 0) {
 			return Collections.emptyList();
 		}
@@ -121,6 +177,7 @@ public final class ModScanner {
 							+ " != " + Game.versionCode + ", skip", null);
 					continue;
 				}
+				m.setRuntimeMeta(origin, child);
 				mods.add(m);
 			} catch (Exception e) {
 				safeLog(TAG, "mod manifest parse fail: " + child.path(), e);
