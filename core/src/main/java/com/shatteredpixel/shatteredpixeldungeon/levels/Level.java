@@ -59,6 +59,9 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mimic;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.MobSpawner;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Piranha;
+import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Rat;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaMobFactory;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaMobRegistry;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.YogFist;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.npcs.Blacksmith;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.npcs.Sheep;
@@ -517,7 +520,22 @@ public abstract class Level implements Bundlable {
 			mobsToSpawn = MobSpawner.getMobRotation(Dungeon.depth);
 		}
 
-		Mob m = Reflection.newInstance(mobsToSpawn.remove(0));
+		Class<? extends Mob> cl = mobsToSpawn.remove(0);
+		if (cl == LuaMobFactory.class) {
+			String id = LuaMobRegistry.randomId();
+			if (id != null) {
+				Mob m = LuaMobRegistry.create(id);
+				if (m != null) {
+					ChampionEnemy.rollForChampion(m);
+					return m;
+				}
+			}
+			// Registry empty/creation failed: degrade to a rat so the spawn never
+			// blocks level generation.
+			cl = Rat.class;
+		}
+
+		Mob m = Reflection.newInstance(cl);
 		ChampionEnemy.rollForChampion(m);
 		return m;
 	}
