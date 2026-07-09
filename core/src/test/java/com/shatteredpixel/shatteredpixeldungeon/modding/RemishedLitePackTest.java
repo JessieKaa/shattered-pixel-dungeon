@@ -6,6 +6,8 @@ import com.badlogic.gdx.backends.headless.HeadlessApplication;
 import com.badlogic.gdx.backends.headless.HeadlessApplicationConfiguration;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
+import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
+import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.MobSpawner;
 import com.shatteredpixel.shatteredpixeldungeon.items.Generator;
 import com.watabou.noosa.Game;
 import com.watabou.utils.GameSettings;
@@ -152,6 +154,53 @@ public class RemishedLitePackTest {
         // never-spawned is exactly the C3 contract for mobs.
         assertTrue("mob is registered (for coverage) yet never spawns in main game (C3)",
                 LuaMobRegistry.contains("remished_lite_marauder"));
+    }
+
+    // ---------------- C3 (M14b): built drop-deck + spawn rotation stay vanilla ----------------
+
+    @Test
+    public void c3_dropDeckWeightAndSpawnRotationUntouched() throws Exception {
+        scanRealMods();
+        LuaEngine.init();
+
+        // Preconditions: remished_lite is genuinely on (content registered), so the
+        // assertions below prove "enabled yet deck/spawn untouched" rather than "off."
+        assertTrue("precondition: showcase item registered (remished_lite on)",
+                LuaItemRegistry.contains("remished_lite_lantern_blade"));
+        assertTrue("precondition: showcase mob registered (remished_lite on)",
+                LuaMobRegistry.contains("remished_lite_marauder"));
+
+        // (1) Built drop-deck weight. c3_enabledDoesNotPolluteMainGame pins the static
+        // firstProb/secondProb fields; this reads the actual categoryProbs map that
+        // Generator.random() draws from. generalReset() rebuilds it from firstProb/
+        // secondProb for every Category (incl. LUA_ITEM), so LUA_ITEM ends up with weight
+        // 0 and Random.chances(categoryProbs) can never select it — the showcase weapon
+        // cannot drop from the standard monster/level drop deck (C3). Reflection mirrors
+        // GeneratorLuaItemTest.deckRandomEmitsLuaItemWhenWeighted.
+        Generator.generalReset();
+        java.lang.reflect.Field f = Generator.class.getDeclaredField("categoryProbs");
+        f.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.HashMap<Generator.Category, Float> probs =
+                (java.util.HashMap<Generator.Category, Float>) f.get(null);
+        Float luaWeight = probs.get(Generator.Category.LUA_ITEM);
+        assertNotNull("categoryProbs must contain LUA_ITEM after generalReset()", luaWeight);
+        assertEquals("built drop-deck must give LUA_ITEM zero weight (C3: no Lua item drops)",
+                0f, luaWeight.floatValue(), 0f);
+
+        // (2) Vanilla mob-spawn rotation. MobSpawner.getMobRotation(depth) is the real
+        // selector the spawn path draws from; it is public static and headless-safe (pure
+        // mob-class data, no Dungeon dependency). Asserting no entry is a LuaMob across
+        // every standard dungeon depth (1..26) proves the registered showcase marauder can
+        // never spawn in main-game levels (C3) — encoding the invariant the existing test
+        // only stated as a grep comment. Failure message carries depth + class for triage.
+        for (int depth = 1; depth <= 26; depth++) {
+            for (Class<? extends Mob> mc : MobSpawner.getMobRotation(depth)) {
+                assertFalse("vanilla spawn rotation must not include LuaMob at depth "
+                                + depth + " (got " + mc.getSimpleName() + ") — C3",
+                        LuaMob.class.isAssignableFrom(mc));
+            }
+        }
     }
 
     // ---------------- hub level json: structurally valid + loadable ----------------
