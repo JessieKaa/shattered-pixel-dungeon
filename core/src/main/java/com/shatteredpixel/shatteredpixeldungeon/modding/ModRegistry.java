@@ -1,6 +1,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.shatteredpixel.shatteredpixeldungeon.items.Generator;
 import com.watabou.utils.GameSettings;
 
 import java.util.Collections;
@@ -94,6 +95,9 @@ public final class ModRegistry {
 				BalanceConfig.applyModOverrides(m.balance);
 			}
 		}
+		// Fork (M15c): propagate lua_spell_drop_prob from BalanceConfig to
+		// Generator so the standard drop deck can roll LUA_SPELL.
+		Generator.setLuaSpellDropProbability(BalanceConfig.LUA_SPELL_DROP_FIRST, BalanceConfig.LUA_SPELL_DROP_SECOND);
 	}
 
 	private static ModManifest lookup(String id) {

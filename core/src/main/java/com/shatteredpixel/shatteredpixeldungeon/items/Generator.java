@@ -194,6 +194,8 @@ import com.shatteredpixel.shatteredpixeldungeon.items.weapon.missiles.Tomahawk;
 import com.shatteredpixel.shatteredpixeldungeon.items.weapon.missiles.Trident;
 import com.shatteredpixel.shatteredpixeldungeon.items.weapon.missiles.darts.Dart;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaItemPool;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaSpell;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaSpellPool;
 import com.shatteredpixel.shatteredpixeldungeon.plants.Blindweed;
 import com.shatteredpixel.shatteredpixeldungeon.plants.Earthroot;
 import com.shatteredpixel.shatteredpixeldungeon.plants.Fadeleaf;
@@ -249,7 +251,12 @@ public class Generator {
 		
 		SCROLL	( 8, 8, Scroll.class ),
 		STONE   ( 1, 1, Runestone.class),
-		
+
+	// Fork (M15c): Lua-defined spells. Default firstProb/secondProb are 0 (C3),
+	// so vanilla runs see no Lua spell drops. Mods opt in via mod.json balance
+	// key lua_spell_drop_prob; ModRegistry calls setLuaSpellDropProbability().
+	LUA_SPELL( 0, 0, LuaSpell.class ),
+
 		GOLD	( 10, 10,   Gold.class ),
 
 	// Fork (M1 modding): Lua-defined items. firstProb/secondProb are 0 so the
@@ -716,6 +723,8 @@ public class Generator {
 				Item item = randomArtifact();
 				//if we're out of artifacts, return a ring instead.
 				return item != null ? item : random(Category.RING);
+			case LUA_SPELL:
+				return randomLuaSpell();
 			case LUA_ITEM:
 				return randomLuaItem();
 			default:
@@ -911,6 +920,28 @@ public class Generator {
 			return random(Category.WEAPON);
 		}
 		return item.random();
+	}
+
+	// Fork (M15c): spawn a Lua-defined spell from LuaSpellPool. If no Lua spells
+	// are registered, fall back to a scroll so the Generator contract holds and
+	// the drop deck stays consumable-shaped. Spells are already stackable/useable.
+	private static Item randomLuaSpell() {
+		Item item = LuaSpellPool.random();
+		if (item == null) {
+			return random(Category.SCROLL);
+		}
+		return item;
+	}
+
+	// Fork (M15c): runtime setter for mod.json lua_spell_drop_prob. first/second
+	// are kept equal by ModRegistry so both drop decks behave consistently.
+	// Also updates the live categoryProbs/defaultCatProbs so toggling a mod
+	// takes effect immediately without requiring a Generator.fullReset().
+	public static void setLuaSpellDropProbability(float first, float second) {
+		Category.LUA_SPELL.firstProb = first;
+		Category.LUA_SPELL.secondProb = second;
+		categoryProbs.put(Category.LUA_SPELL, usingFirstDeck ? first : second);
+		defaultCatProbs.put(Category.LUA_SPELL, first + second);
 	}
 
 	private static final String FIRST_DECK = "first_deck";

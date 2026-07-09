@@ -39,6 +39,12 @@ public final class BalanceConfig {
     public static volatile int SHIELD_MAX = 1000;
     public static volatile float SHIELD_DECAY_PER_TURN = 0f;
 
+    // Fork (M15c): Generator.Category.LUA_SPELL drop probabilities. Defaults are
+    // 0/0 so vanilla runs never drop Lua spells; mods opt in via
+    // mod.json balance.lua_spell_drop_prob.
+    public static volatile float LUA_SPELL_DROP_FIRST = 0f;
+    public static volatile float LUA_SPELL_DROP_SECOND = 0f;
+
     /**
      * Apply a mod's {@code balance} overrides on top of the current values.
      * Keys are matched case-insensitively ({@link Locale#ROOT}, so Turkish-i
@@ -85,6 +91,14 @@ public final class BalanceConfig {
                     else Gdx.app.error("BalanceConfig", "ignoring shield_decay_per_turn=" + v + " (must be finite, in [0,10000])");
                     break;
                 }
+                case "lua_spell_drop_prob": {
+                    Double d = finiteInRange(v, 0, 10000);
+                    if (d != null) {
+                        LUA_SPELL_DROP_FIRST = d.floatValue();
+                        LUA_SPELL_DROP_SECOND = d.floatValue();
+                    } else Gdx.app.error("BalanceConfig", "ignoring lua_spell_drop_prob=" + v + " (must be finite, in [0,10000])");
+                    break;
+                }
                 default:
                     // unknown key — silently ignored for forward-compat
                     break;
@@ -114,5 +128,7 @@ public final class BalanceConfig {
         MANA_REGEN_DELAY = 8f;
         SHIELD_MAX = 1000;
         SHIELD_DECAY_PER_TURN = 0f;
+        LUA_SPELL_DROP_FIRST = 0f;
+        LUA_SPELL_DROP_SECOND = 0f;
     }
 }
