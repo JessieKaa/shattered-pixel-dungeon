@@ -45,6 +45,8 @@ public class GeneratorLuaSpellTest {
         ModTestSupport.enableTestMod();
         ModTestSupport.resetLuaState();
         BalanceConfig.resetToDefaults();
+        Generator.setLuaItemProbability(0f, 0f);
+        Generator.setLuaSpellDropProbability(0f, 0f);
         Generator.fullReset();
     }
 
