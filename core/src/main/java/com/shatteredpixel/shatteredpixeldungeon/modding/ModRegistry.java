@@ -109,6 +109,7 @@ public final class ModRegistry {
 		// Override BalanceConfig with the aggregated max so callers see the same value.
 		BalanceConfig.LUA_ITEM_DROP_PROB = luaDropProbMax;
 		Generator.setLuaItemProbability(luaDropProbMax, luaDropProbMax);
+		Generator.setLuaSpellDropProbability(BalanceConfig.LUA_SPELL_DROP_FIRST, BalanceConfig.LUA_SPELL_DROP_SECOND);
 	}
 
 	private static ModManifest lookup(String id) {

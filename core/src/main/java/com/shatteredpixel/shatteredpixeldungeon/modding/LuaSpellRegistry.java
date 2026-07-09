@@ -2,6 +2,8 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import org.luaj.vm2.LuaTable;
 
+import com.watabou.utils.Random;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -44,6 +46,12 @@ public final class LuaSpellRegistry {
 	/** All registered ids. */
 	public static Set<String> ids() {
 		return Collections.unmodifiableSet(spells.keySet());
+	}
+
+	/** Uniform random registered id; null if the registry is empty. */
+	public static String randomId() {
+		if (spells.isEmpty()) return null;
+		return Random.oneOf(spells.keySet().toArray(new String[0]));
 	}
 
 	public static LuaSpell create(String id) {
