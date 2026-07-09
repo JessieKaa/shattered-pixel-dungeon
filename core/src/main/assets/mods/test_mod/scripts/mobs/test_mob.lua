@@ -18,7 +18,7 @@ register_mob {
     ht = 20,
     attack = 8,
     defense = 4,
-    sprite = "crab",
+    spriteFile = "sprites/mobs/mob_TestMob.png",
 
     attackProc = function(selfId, enemyId, baseDamage)
         -- Returning baseDamage is a no-op; a real mod could buff/debuff here.

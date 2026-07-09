@@ -7,6 +7,7 @@ register_spell {
     name = "测试法术 (Lua)",
     desc = "M3d 消耗性法术:使用即消耗,onUse 回调验证 charId 范式 + RPD API。",
     image = 0,
+    spriteFile = "sprites/items/item_HookedDagger.png",
 
     onUse = function(heroId)
         -- RPD.GLog is injected by the engine (M2). Reaching it from here

@@ -53,6 +53,92 @@ can already be turned into a texture by `TextureCache.get(path)`.
   `image = tbl.get("image").optint(0)` into the inherited `Item.image` field.
   It therefore has the same frame-index semantics as `LuaItem`.
 
+## M16a: runtime `spriteFile` support
+
+M16a implements Option A for **items, spells, and mobs**. Lua content can now
+reference a standalone image file inside its own mod directory using the
+`spriteFile` field.
+
+### Supported Lua content
+
+| Type   | Field name | Example value                          | Notes                                |
+|--------|------------|----------------------------------------|--------------------------------------|
+| Item   | `spriteFile` | `"sprites/items/item_HookedDagger.png"` | `LuaItem` / `LuaMaterial`            |
+| Spell  | `spriteFile` | `"sprites/items/spell_Fireball.png"`    | `LuaSpell`                           |
+| Mob    | `spriteFile` | `"sprites/mobs/mob_Spinner.png"`        | `LuaMob` uses `ModMobSprite`         |
+
+`LuaNpc`, `LuaAlly`, and `LuaHeroClass` do **not** read `spriteFile` yet and
+keep their existing sprite whitelist behaviour.
+
+### Path rules
+
+- The path is **relative to the declaring mod's own directory**.
+  - Builtin mod: resolved under `assets/mods/<modId>/<spriteFile>`.
+  - External mod: resolved under `mods_user/<modId>/<spriteFile>`.
+- Must be a relative path; absolute paths, backslashes, and `..` segments are
+  rejected.
+- Only image extensions are accepted: `.png`, `.jpg`, `.jpeg`, `.webp`.
+- Missing or invalid `spriteFile` falls back silently to the legacy `image` /
+  `sprite` path and logs a diagnostic error.
+
+### Declaring mod ownership
+
+When `register_item` / `register_spell` / `register_mob` run during engine init,
+`LuaEngine` writes a hidden string field `__mod_id` into the Lua table. Java
+reads it back during `hydrate` as `ownerModId` and uses it to locate the owning
+mod directory. This field is **not** persisted in the save Bundle; on
+save/load the Lua id is restored and the definition (including `__mod_id` and
+`spriteFile`) is re-hydrated from the Lua registry.
+
+### Example item definition
+
+```lua
+register_item {
+    id = "hooked_dagger",
+    name = "Hooked Dagger",
+    desc = "A curved blade that leaves bleeding wounds.",
+    tier = 1,
+    image = 0,                       -- fallback spritesheet frame
+    spriteFile = "sprites/items/item_HookedDagger.png",
+
+    attackProc = function(attacker, defender, baseDamage)
+        RPD.affectBuff(defender, "Bleeding", 3)
+        return baseDamage
+    end,
+}
+```
+
+### Example mob definition
+
+```lua
+register_mob {
+    id = "test_mob",
+    name = "Test Mob",
+    hp = 20,
+    ht = 20,
+    attack = 8,
+    defense = 4,
+    spriteFile = "sprites/mobs/mob_TestMob.png",
+}
+```
+
+### Java classes involved
+
+- `com.shatteredpixel.shatteredpixeldungeon.modding.ModSpriteCache` — path
+  validation, builtin/external resolution, and texture caching keyed by
+  `modId:path`.
+- `com.shatteredpixel.shatteredpixeldungeon.sprites.ModMobSprite` — minimal
+  `MobSprite` subclass that renders a single PNG as one-frame idle/run/attack/die
+  animations.
+- `com.shatteredpixel.shatteredpixeldungeon.sprites.ItemSprite.view(Item)` —
+  checks `LuaItem`/`LuaSpell`/`LuaMaterial` for `spriteFile()` first, then falls
+  back to the spritesheet frame.
+- `com.shatteredpixel.shatteredpixeldungeon.modding.LuaEngine` — injects
+  `__mod_id` during registration.
+- `com.shatteredpixel.shatteredpixeldungeon.modding.LuaItem` /
+  `LuaSpell` / `LuaMaterial` / `LuaMob` — parse and expose `spriteFile()` /
+  `ownerModId()`.
+
 ## Why the imported remixed PNGs are not directly usable yet
 
 The remixed-dungeon source ships **one PNG per sprite** (e.g. `mob_Spinner.png`,
@@ -144,15 +230,24 @@ Cons:
 
 ## Recommended path forward
 
-1. **This milestone (M15e)** only imports the assets and documents the gap.
-2. **Next milestone (content port / script rewrite)** pick Option A for mobs and
-   items because it maps 1:1 to remixed's PNG-per-sprite format and does not add
-   a build step. Implement:
-   - `LuaItem.imageFile` + `LuaSpell.imageFile` + `ModItemSprite`.
-   - `LuaMob.spriteFile` + `ModCharSprite`.
-3. **Heroes/allies/NPCs** follow the same `ModCharSprite` pattern.
-4. **Buffs/spells** may still need Option A or Option C depending on whether
+1. **M16a (this milestone)** implements Option A for `LuaItem`, `LuaSpell`,
+   `LuaMaterial`, and `LuaMob` using the `spriteFile` field. It is intentionally
+   a static-image MVP: no animation frames, no TextureAtlas packing, no
+   direction frames.
+2. **M16b+ / content port** can extend the same pattern to `LuaNpc`, `LuaAlly`,
+   and `LuaHeroClass`, or add animation-frame metadata if needed.
+3. **Buffs/spells** may still need Option A or Option C depending on whether
    `BuffIndicator` is refactored to accept a path-based icon.
+
+## Limitations of the M16a implementation
+
+- `spriteFile` is **static only**: one image = one frame. Mobs get idle/run/
+  attack/die mapped to the same frame.
+- No support for animated frames, sprite atlases, or directional sprites.
+- Only Lua-defined items/spells/materials/mobs consume `spriteFile`. Vanilla
+  items and mobs are unchanged.
+- Path traversal is rejected; absolute paths and backslashes are rejected.
+- External mod files must be under the mod's own `mods_user/<id>/` directory.
 
 ## Files referenced
 
@@ -163,7 +258,10 @@ Cons:
 - `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/sprites/CharSprite.java`
 - `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/sprites/MobSprite.java`
 - `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/sprites/RatSprite.java`
+- `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/sprites/ModMobSprite.java`
+- `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/modding/ModSpriteCache.java`
 - `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/modding/LuaItem.java`
+- `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/modding/LuaSpell.java`
 - `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/modding/LuaMob.java`
 - `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/modding/LuaNpc.java`
 - `core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/modding/LuaBuff.java`

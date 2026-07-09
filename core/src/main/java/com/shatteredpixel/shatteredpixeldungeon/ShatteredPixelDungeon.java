@@ -26,6 +26,9 @@ import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.TitleScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.WelcomeScene;
 import com.shatteredpixel.shatteredpixeldungeon.modding.LuaEngine;
+import com.shatteredpixel.shatteredpixeldungeon.modding.ModSpriteCache;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.glutils.GLVersion;
 import com.watabou.noosa.Game;
 import com.watabou.noosa.audio.Music;
 import com.watabou.noosa.audio.Sample;
@@ -45,6 +48,12 @@ public class ShatteredPixelDungeon extends Game {
 	public static final int v3_1_1 = 850;
 	public static final int v3_2_5 = 877;
 	public static final int v3_3_0 = 883;
+
+	// Fork (M16a): mirror of Game's private versionContextRef. Game.resize()
+	// only reloads its own TextureCache on GL context loss; our ModSpriteCache
+	// holds SmartTextures that the engine can't see, so we detect the same
+	// context loss (GLVersion reference change) and reload them ourselves.
+	private GLVersion modSpriteContextRef;
 	
 	public ShatteredPixelDungeon( PlatformSupport platform ) {
 		super( sceneClass == null ? WelcomeScene.class : sceneClass, platform );
@@ -63,6 +72,11 @@ public class ShatteredPixelDungeon extends Game {
 	@Override
 	public void create() {
 		super.create();
+
+		// Fork (M16a): snapshot the GL context so resize() can detect loss and
+		// re-upload our mod sprite textures. super.create() already ran
+		// TextureCache.reload() for the engine's textures.
+		modSpriteContextRef = Gdx.graphics.getGLVersion();
 
 		updateSystemUI();
 		SPDAction.loadBindings();
@@ -133,6 +147,14 @@ public class ShatteredPixelDungeon extends Game {
 				(height != Game.height || width != Game.width)) {
 			PixelScene.noFade = true;
 			((PixelScene) scene).saveWindows();
+		}
+
+		// Fork (M16a): if the GL context was lost, super.resize() has already
+		// reloaded the engine's TextureCache. Reload our mod sprite textures too,
+		// mirroring Game's GLVersion-reference-change detection.
+		if (modSpriteContextRef != Gdx.graphics.getGLVersion()) {
+			modSpriteContextRef = Gdx.graphics.getGLVersion();
+			ModSpriteCache.reload();
 		}
 
 		super.resize( width, height );

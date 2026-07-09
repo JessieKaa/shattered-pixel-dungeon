@@ -432,17 +432,25 @@ public class LuaEngine implements ResourceFinder {
 			return;
 		}
 		java.util.Arrays.sort(names);
-		for (String n : names) {
-			String path = base + "/" + n;
-			try (InputStream in = openScriptStream(mod, subdir, n)) {
-				if (in == null) {
-					Gdx.app.error(TAG, "Script " + path + " could not be opened");
-					continue;
+		// M16a: tag every register_* table with this mod's id so spriteFile can
+		// resolve its owning mod directory. try/finally keeps currentMod scoped to
+		// this mod's scripts only, mirroring loadModEntryScripts().
+		currentMod = mod;
+		try {
+			for (String n : names) {
+				String path = base + "/" + n;
+				try (InputStream in = openScriptStream(mod, subdir, n)) {
+					if (in == null) {
+						Gdx.app.error(TAG, "Script " + path + " could not be opened");
+						continue;
+					}
+					globals.load(new InputStreamReader(in, "UTF-8"), path).call();
+				} catch (Exception e) {
+					Gdx.app.error(TAG, "Failed to load " + path, e);
 				}
-				globals.load(new InputStreamReader(in, "UTF-8"), path).call();
-			} catch (Exception e) {
-				Gdx.app.error(TAG, "Failed to load " + path, e);
 			}
+		} finally {
+			currentMod = null;
 		}
 		if (registrySize.getAsInt() == 0) {
 			Gdx.app.error(TAG, "No " + label + " registered after scanning " + base);
@@ -613,6 +621,9 @@ public class LuaEngine implements ResourceFinder {
 				// (attackProc/onEquip/onDeactivate) are plain table entries and
 				// need no validation here — LuaItemCallbacks handles missing ones.
 				tbl.get("image").optint(0);
+				// M16a: tag the definition with the registering mod id so spriteFile
+				// resolution can locate the owning mod directory after save/load.
+				markOwnerMod(tbl);
 				LuaItemRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_item rejected a malformed definition", e);
@@ -641,6 +652,8 @@ public class LuaEngine implements ResourceFinder {
 				tbl.get("name").checkjstring();
 				// desc/image optional; onUse is a plain table entry, no validation here.
 				tbl.get("image").optint(0);
+				// M16a: tag the definition with the registering mod id for spriteFile resolution.
+				markOwnerMod(tbl);
 				LuaSpellRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_spell rejected a malformed definition", e);
@@ -670,6 +683,8 @@ public class LuaEngine implements ResourceFinder {
 				tbl.get("name").checkjstring();
 				// sprite optional; onInteract is a plain table entry, no validation here.
 				tbl.get("sprite").optjstring("rat_king");
+				// M16a: tag the definition with the registering mod id for spriteFile resolution.
+				markOwnerMod(tbl);
 				LuaNpcRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_npc rejected a malformed definition", e);
@@ -793,6 +808,8 @@ public class LuaEngine implements ResourceFinder {
 				tbl.get("attack").checkint();
 				tbl.get("defense").checkint();
 				// sprite + act/attackProc/defenseProc/die are optional; no validation here.
+				// M16a: tag the definition with the registering mod id for spriteFile resolution.
+				markOwnerMod(tbl);
 				LuaMobRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_mob rejected a malformed definition", e);
@@ -829,6 +846,8 @@ public class LuaEngine implements ResourceFinder {
 				tbl.get("attack").checkint();
 				tbl.get("defense").checkint();
 				// sprite + act/attackProc/defenseProc/die/onCommand are optional; no validation here.
+				// M16a: tag the definition with the registering mod id for spriteFile resolution.
+				markOwnerMod(tbl);
 				LuaAllyRegistry.register(id, tbl);
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_ally rejected a malformed definition", e);
@@ -933,6 +952,17 @@ public class LuaEngine implements ResourceFinder {
 			if ("..".equals(seg)) {
 				throw new IllegalArgumentException("level path must not contain '..' segments: " + path);
 			}
+		}
+	}
+
+	/** M16a: tag a Lua content table with the currently-loading mod id.
+	 *  The key is prefixed with underscores so normal Lua scripts are unlikely
+	 *  to collide with or depend on it; Java-side hydrate code reads it back.
+	 */
+	private static void markOwnerMod(LuaTable tbl) {
+		ModManifest mod = LuaEngine.currentMod;
+		if (mod != null) {
+			tbl.set("__mod_id", mod.id);
 		}
 	}
 

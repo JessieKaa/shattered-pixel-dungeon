@@ -29,6 +29,10 @@ import com.shatteredpixel.shatteredpixeldungeon.items.Gold;
 import com.shatteredpixel.shatteredpixeldungeon.items.Heap;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaItem;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaMaterial;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaSpell;
+import com.shatteredpixel.shatteredpixeldungeon.modding.ModSpriteCache;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
 import com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTilemap;
@@ -199,6 +203,21 @@ public class ItemSprite extends MovieClip {
 	}
 
 	public ItemSprite view( Item item ){
+		String spriteFile = modSpriteFile(item);
+		if (spriteFile != null) {
+			SmartTexture modTx = ModSpriteCache.get(item != null ? item.ownerModId() : null, spriteFile);
+			if (modTx != null) {
+				view(modTx, item.glowing());
+				Emitter emitter = item.emitter();
+				if (emitter != null && parent != null) {
+					emitter.pos( this );
+					parent.add( emitter );
+					this.emitter = emitter;
+				}
+				return this;
+			}
+			// Missing/invalid spriteFile falls through to spritesheet fallback.
+		}
 		view(item.image(), item.glowing());
 		Emitter emitter = item.emitter();
 		if (emitter != null && parent != null) {
@@ -208,7 +227,24 @@ public class ItemSprite extends MovieClip {
 		}
 		return this;
 	}
-	
+
+	/** M16a: extract spriteFile from Lua item/spell/material, or null if none. */
+	private static String modSpriteFile(Item item) {
+		if (item instanceof LuaItem) {
+			LuaItem li = (LuaItem) item;
+			return li.spriteFile();
+		}
+		if (item instanceof LuaSpell) {
+			LuaSpell ls = (LuaSpell) item;
+			return ls.spriteFile();
+		}
+		if (item instanceof LuaMaterial) {
+			LuaMaterial lm = (LuaMaterial) item;
+			return lm.spriteFile();
+		}
+		return null;
+	}
+
 	public ItemSprite view( Heap heap ){
 		if (heap.size() <= 0 || heap.items == null){
 			return view( 0, null );
@@ -246,6 +282,25 @@ public class ItemSprite extends MovieClip {
 		return this;
 	}
 
+	/** M16a: render a standalone mod sprite texture. */
+	public ItemSprite view(SmartTexture modTx, Glowing glowing) {
+		if (this.emitter != null) this.emitter.killAndErase();
+		emitter = null;
+		texture = modTx;
+		frame( new com.watabou.utils.RectF( 0, 0, 1, 1 ) );
+		width = modTx.width;
+		height = modTx.height;
+		updateVertices();
+		glow( glowing );
+		// Adjust perspective raise for short icons so they remain visible.
+		if (height < 8f) {
+			perspectiveRaise = (5 + 8 - height) / 16f;
+		} else {
+			perspectiveRaise = 5 / 16f;
+		}
+		return this;
+	}
+
 	public void frame( int image ){
 		frame( ItemSpriteSheet.film.get( image ));
 
@@ -255,7 +310,7 @@ public class ItemSprite extends MovieClip {
 			perspectiveRaise =  (5 + 8 - height) / 16f;
 		}
 	}
-	
+
 	public synchronized void glow( Glowing glowing ){
 		this.glowing = glowing;
 		if (glowing == null) resetColor();

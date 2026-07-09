@@ -65,6 +65,11 @@ public class LuaSpell extends Item {
 	// detach). Defaults to consumable so existing spell defs are unchanged.
 	private String useMode = "consumable";
 
+	/** M16a: optional standalone sprite file path relative to the owning mod dir. */
+	private String spriteFile;
+	/** M16a: mod id that registered this spell, used to resolve spriteFile. */
+	private String ownerModId;
+
 	{
 		stackable = true;
 		defaultAction = AC_USE;
@@ -85,6 +90,9 @@ public class LuaSpell extends Item {
 		nameStr = tbl.get("name").checkjstring();
 		descStr = tbl.get("desc").optjstring("");
 		image = tbl.get("image").optint(0);
+		// M16a: optional standalone sprite file path.
+		spriteFile = tbl.get("spriteFile").optjstring(null);
+		ownerModId = tbl.get("__mod_id").optjstring(null);
 		// M6d/M7d: optional Remished-style metadata. Cast time overrides the
 		// default 1f spend. spellCost + useMode drive the M7d mana track;
 		// targeting drives the M7c selectCell path. All restored via the same
@@ -260,6 +268,16 @@ public class LuaSpell extends Item {
 
 	public String useMode() {
 		return useMode;
+	}
+
+	/** M16a: optional standalone sprite file path relative to the owning mod dir. */
+	public String spriteFile() {
+		return spriteFile;
+	}
+
+	/** M16a: id of the mod that registered this spell, used to resolve spriteFile. */
+	public String ownerModId() {
+		return ownerModId;
 	}
 
 	@Override

@@ -75,6 +75,11 @@ public class LuaItem extends MeleeWeapon {
 	private boolean explicitActions;
 	private ArrayList<String> actionList;
 
+	/** M16a: optional standalone sprite file path relative to the owning mod dir. */
+	private String spriteFile;
+	/** M16a: mod id that registered this item, used to resolve spriteFile. */
+	private String ownerModId;
+
 	/** M11c: per-instance mutable state passed to Lua callbacks and persisted. */
 	private LuaTable state;
 
@@ -97,6 +102,10 @@ public class LuaItem extends MeleeWeapon {
 		// longer requires it). A missing image falls back to 0 rather than
 		// throwing at create-time.
 		image = tbl.get("image").optint(0);
+		// M16a: optional standalone sprite file path. Stored as-is; rendering code
+		// resolves it against ownerModId via ModSpriteCache.
+		spriteFile = tbl.get("spriteFile").optjstring(null);
+		ownerModId = tbl.get("__mod_id").optjstring(null);
 
 		LuaValue defaultAction = tbl.get("defaultAction");
 		if (defaultAction.isnil()) defaultAction = tbl.get("default_action");
@@ -308,6 +317,16 @@ public class LuaItem extends MeleeWeapon {
 	@LuaInterface
 	public String desc() {
 		return descStr;
+	}
+
+	/** M16a: optional standalone sprite file path relative to the owning mod dir. */
+	public String spriteFile() {
+		return spriteFile;
+	}
+
+	/** M16a: id of the mod that registered this item, used to resolve spriteFile. */
+	public String ownerModId() {
+		return ownerModId;
 	}
 
 	@Override
