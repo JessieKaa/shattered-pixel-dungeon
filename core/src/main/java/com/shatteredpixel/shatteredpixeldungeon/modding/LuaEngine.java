@@ -199,9 +199,47 @@ public class LuaEngine implements ResourceFinder {
 			// and continue, never fatal — one broken entry cannot crash startup or block other mods.
 			loadModEntryScripts();
 
+			// M16c: finalize per-mod status now that all loaders have run. addError/addWarning already
+			// set FAILED/WARNINGS during load, so only lift clean enabled mods to LOADED and mark
+			// disabled mods DISABLED. Status precedence is enforced inside ModDiagnostics (FAILED
+			// wins, then DISABLED, then WARNINGS), so a disabled mod that also errored keeps FAILED.
+			finalizeModStatuses();
+
 			initialized = true;
 		} catch (Exception e) {
 			Gdx.app.error(TAG, "init failed", e);
+		}
+	}
+
+	/**
+	 * M16c: set the terminal diagnostic status per mod after loading. Enabled mods with no errors
+	 * become {@link ModDiagnostics.Status#LOADED} (unless a warning promoted them to WARNINGS, which
+	 * we preserve); disabled mods become {@link ModDiagnostics.Status#DISABLED}. Mods already in
+	 * FAILED stay FAILED (their errors are the more useful signal). Idempotent with the addError/
+	 * addWarning side effects baked into ModDiagnostics.
+	 */
+	private void finalizeModStatuses() {
+		for (ModManifest mod : ModRegistry.all()) {
+			ModDiagnostics diag = ModRegistry.getDiagnostics(mod.id);
+			if (!ModRegistry.isEnabled(mod.id)) {
+				if (diag == null || (diag.status() != ModDiagnostics.Status.FAILED
+						&& diag.status() != ModDiagnostics.Status.WARNINGS)) {
+					ModRegistry.setModStatus(mod.id, ModDiagnostics.Status.DISABLED);
+				}
+				continue;
+			}
+			if (diag == null) {
+				ModRegistry.setModStatus(mod.id, ModDiagnostics.Status.LOADED);
+				continue;
+			}
+			ModDiagnostics.Status s = diag.status();
+			if (s == ModDiagnostics.Status.DISCOVERED) {
+				ModRegistry.setModStatus(mod.id, ModDiagnostics.Status.LOADED);
+			} else if (s == ModDiagnostics.Status.DISABLED) {
+				// No error/warning landed on an enabled mod; promote to LOADED.
+				ModRegistry.setModStatus(mod.id, ModDiagnostics.Status.LOADED);
+			}
+			// FAILED / WARNINGS already set by the loaders — leave them.
 		}
 	}
 
@@ -385,12 +423,14 @@ public class LuaEngine implements ResourceFinder {
 				try (InputStream in = openModEntryStream(mod)) {
 					if (in == null) {
 						Gdx.app.error(TAG, "mod " + mod.id + " entry not found: " + chunk);
+						ModRegistry.addModError(mod.id, "entry not found: " + mod.entry);
 						continue;
 					}
 					globals.load(new InputStreamReader(in, "UTF-8"), chunk).call();
 				}
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "mod " + mod.id + " entry load failed: " + chunk, e);
+				ModRegistry.addModError(mod.id, "entry " + mod.entry + ": " + shortMsg(e));
 			} finally {
 				currentMod = null;
 			}
@@ -428,7 +468,9 @@ public class LuaEngine implements ResourceFinder {
 		String[] names = listScriptNames(mod, subdir);
 		String base = chunkPath(mod, subdir);
 		if (names.length == 0) {
-			Gdx.app.error(TAG, base + " contains no .lua files; no " + label + " registered");
+			// An empty scripts dir is the common case — most mods define only a few content types,
+			// so the other ~10 dirs are legitimately absent. Stay silent here (M16c); only a script
+			// file that fails to compile/run is a real diagnostic below.
 			return;
 		}
 		java.util.Arrays.sort(names);
@@ -437,16 +479,28 @@ public class LuaEngine implements ResourceFinder {
 			try (InputStream in = openScriptStream(mod, subdir, n)) {
 				if (in == null) {
 					Gdx.app.error(TAG, "Script " + path + " could not be opened");
+					ModRegistry.addModError(mod.id, label + ": cannot open " + n);
 					continue;
 				}
 				globals.load(new InputStreamReader(in, "UTF-8"), path).call();
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "Failed to load " + path, e);
+				ModRegistry.addModError(mod.id, label + ": " + n + " — " + shortMsg(e));
 			}
 		}
 		if (registrySize.getAsInt() == 0) {
 			Gdx.app.error(TAG, "No " + label + " registered after scanning " + base);
 		}
+	}
+
+	/** M16c: shorten an exception message for compact diagnostic display (avoids dumping full
+	 *  stack traces into the mod manager UI). Returns the exception class + message, capped. */
+	static String shortMsg(Throwable e) {
+		if (e == null) return "unknown";
+		String cls = e.getClass().getSimpleName();
+		String msg = e.getMessage();
+		String out = (msg == null || msg.isEmpty()) ? cls : cls + ": " + msg;
+		return out.length() > 160 ? out.substring(0, 157) + "..." : out;
 	}
 
 	/**
@@ -591,6 +645,25 @@ public class LuaEngine implements ResourceFinder {
 		g.set("RPD", RpdApi.build());
 	}
 
+	/** M16c: id under which a register_* call's diagnostics are filed. Falls back to the synthetic
+	 *  {@code "init.lua"} key when no mod entry is executing (i.e. a call from global init.lua), so
+	 *  top-level registrations are still attributable rather than dropped. */
+	static String currentModDiagnosticId() {
+		return currentMod != null ? currentMod.id : "init.lua";
+	}
+
+	/** M16c: record a successful registration against the current mod's content count. */
+	static void registerSucceeded(String typeKey) {
+		ModRegistry.incrementModCount(currentModDiagnosticId(), typeKey);
+	}
+
+	/** M16c: record a rejected registration as a mod diagnostic error. {@code detail} is the
+	 *  register_* global name + reason; the throwable is optional (explicit rejections have none). */
+	static void registerRejected(String detail, Throwable e) {
+		ModRegistry.addModError(currentModDiagnosticId(),
+				e == null ? detail : detail + ": " + shortMsg(e));
+	}
+
 	/** The {@code register_item(table)} global handed to Lua. Validates required fields, logs and skips on bad input. */
 	private static class RegisterItemFunction extends OneArgFunction {
 		@Override
@@ -598,6 +671,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_item: expected a table, got " + arg.typename());
+					registerRejected("register_item: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -614,8 +688,10 @@ public class LuaEngine implements ResourceFinder {
 				// need no validation here — LuaItemCallbacks handles missing ones.
 				tbl.get("image").optint(0);
 				LuaItemRegistry.register(id, tbl);
+				registerSucceeded("items");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_item rejected a malformed definition", e);
+				registerRejected("register_item", e);
 			}
 			return NIL;
 		}
@@ -634,6 +710,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_spell: expected a table, got " + arg.typename());
+					registerRejected("register_spell: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -642,8 +719,10 @@ public class LuaEngine implements ResourceFinder {
 				// desc/image optional; onUse is a plain table entry, no validation here.
 				tbl.get("image").optint(0);
 				LuaSpellRegistry.register(id, tbl);
+				registerSucceeded("spells");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_spell rejected a malformed definition", e);
+				registerRejected("register_spell", e);
 			}
 			return NIL;
 		}
@@ -663,6 +742,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_npc: expected a table, got " + arg.typename());
+					registerRejected("register_npc: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -671,8 +751,10 @@ public class LuaEngine implements ResourceFinder {
 				// sprite optional; onInteract is a plain table entry, no validation here.
 				tbl.get("sprite").optjstring("rat_king");
 				LuaNpcRegistry.register(id, tbl);
+				registerSucceeded("npcs");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_npc rejected a malformed definition", e);
+				registerRejected("register_npc", e);
 			}
 			return NIL;
 		}
@@ -690,14 +772,17 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_painter: expected a table, got " + arg.typename());
+					registerRejected("register_painter: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
 				String id = tbl.get("id").checkjstring();
 				// paint/decorate are optional table entries; no validation here.
 				LuaPainterRegistry.register(id, tbl);
+				registerSucceeded("painters");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_painter rejected a malformed definition", e);
+				registerRejected("register_painter", e);
 			}
 			return NIL;
 		}
@@ -716,6 +801,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_trap: expected a table, got " + arg.typename());
+					registerRejected("register_trap: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -724,8 +810,10 @@ public class LuaEngine implements ResourceFinder {
 				tbl.get("color").optint(com.shatteredpixel.shatteredpixeldungeon.levels.traps.Trap.GREY);
 				tbl.get("shape").optint(com.shatteredpixel.shatteredpixeldungeon.levels.traps.Trap.DOTS);
 				LuaTrapRegistry.register(id, tbl);
+				registerSucceeded("traps");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_trap rejected a malformed definition", e);
+				registerRejected("register_trap", e);
 			}
 			return NIL;
 		}
@@ -746,6 +834,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_shop: expected a table, got " + arg.typename());
+					registerRejected("register_shop: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -753,13 +842,16 @@ public class LuaEngine implements ResourceFinder {
 				tbl.get("name").checkjstring();
 				if (!tbl.get("items").istable()) {
 					Gdx.app.error(TAG, "register_shop '" + id + "': items must be a table — rejected");
+					registerRejected("register_shop '" + id + "': items must be a table", null);
 					return NIL;
 				}
 				// sprite optional; per-item validation happens in LuaShopNpc.hydrate.
 				tbl.get("sprite").optjstring("shopkeeper");
 				LuaShopRegistry.register(id, tbl);
+				registerSucceeded("shops");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_shop rejected a malformed definition", e);
+				registerRejected("register_shop", e);
 			}
 			return NIL;
 		}
@@ -780,6 +872,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_mob: expected a table, got " + arg.typename());
+					registerRejected("register_mob: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -794,8 +887,10 @@ public class LuaEngine implements ResourceFinder {
 				tbl.get("defense").checkint();
 				// sprite + act/attackProc/defenseProc/die are optional; no validation here.
 				LuaMobRegistry.register(id, tbl);
+				registerSucceeded("mobs");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_mob rejected a malformed definition", e);
+				registerRejected("register_mob", e);
 			}
 			return NIL;
 		}
@@ -816,6 +911,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_ally: expected a table, got " + arg.typename());
+					registerRejected("register_ally: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -830,8 +926,10 @@ public class LuaEngine implements ResourceFinder {
 				tbl.get("defense").checkint();
 				// sprite + act/attackProc/defenseProc/die/onCommand are optional; no validation here.
 				LuaAllyRegistry.register(id, tbl);
+				registerSucceeded("allies");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_ally rejected a malformed definition", e);
+				registerRejected("register_ally", e);
 			}
 			return NIL;
 		}
@@ -852,13 +950,16 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_hero: expected a table, got " + arg.typename());
+					registerRejected("register_hero: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
 				LuaHeroClass hero = LuaHeroClass.hydrate(tbl);
 				LuaHeroRegistry.register(hero, tbl);
+				registerSucceeded("heroes");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_hero rejected a malformed definition", e);
+				registerRejected("register_hero", e);
 			}
 			return NIL;
 		}
@@ -885,6 +986,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_level: expected a table, got " + arg.typename());
+					registerRejected("register_level: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -899,8 +1001,10 @@ public class LuaEngine implements ResourceFinder {
 						mod != null ? mod.origin : null,
 						mod != null ? mod.baseDir : null,
 						path);
+				registerSucceeded("levels");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_level rejected a malformed definition", e);
+				registerRejected("register_level", e);
 			}
 			return NIL;
 		}
@@ -948,6 +1052,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_buff: expected a table, got " + arg.typename());
+					registerRejected("register_buff: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -955,8 +1060,10 @@ public class LuaEngine implements ResourceFinder {
 				tbl.get("name").checkjstring();
 				// icon/act/attachTo/detach/immunities/onRestore are optional; no validation here.
 				LuaBuffRegistry.register(id, tbl);
+				registerSucceeded("buffs");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_buff rejected a malformed definition", e);
+				registerRejected("register_buff", e);
 			}
 			return NIL;
 		}
@@ -978,6 +1085,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_talent_override: expected a table, got " + arg.typename());
+					registerRejected("register_talent_override: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -985,8 +1093,10 @@ public class LuaEngine implements ResourceFinder {
 				com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent talent =
 						com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent.valueOf(id);
 				LuaTalentOverride.register(talent, tbl);
+				registerSucceeded("talents");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_talent_override rejected a malformed definition", e);
+				registerRejected("register_talent_override", e);
 			}
 			return NIL;
 		}
@@ -1022,6 +1132,7 @@ public class LuaEngine implements ResourceFinder {
 			try {
 				if (!arg.istable()) {
 					Gdx.app.error(TAG, "register_talent: expected a table, got " + arg.typename());
+					registerRejected("register_talent: expected a table, got " + arg.typename(), null);
 					return NIL;
 				}
 				LuaTable tbl = arg.checktable();
@@ -1029,6 +1140,7 @@ public class LuaEngine implements ResourceFinder {
 				if (!id.startsWith("MOD_")) {
 					Gdx.app.error(TAG, "register_talent: id must start with \"MOD_\" (got \""
 							+ id + "\"), skipping; to retune a vanilla talent use register_talent_override");
+					registerRejected("register_talent: id must start with \"MOD_\" (got \"" + id + "\")", null);
 					return NIL;
 				}
 				com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent talent;
@@ -1037,18 +1149,21 @@ public class LuaEngine implements ResourceFinder {
 				} catch (IllegalArgumentException e) {
 					Gdx.app.error(TAG, "register_talent: id '" + id
 							+ "' is not a declared Talent enum constant — declare a MOD_ slot in Talent.java first, skipping");
+					registerRejected("register_talent: id '" + id + "' is not a declared Talent enum constant", null);
 					return NIL;
 				}
 				LuaValue tierV = tbl.get("tier");
 				if (!tierV.isint()) {
 					Gdx.app.error(TAG, "register_talent '" + id + "': tier must be an int, skipping (got "
 							+ tierV.typename() + ")");
+					registerRejected("register_talent '" + id + "': tier must be an int (got " + tierV.typename() + ")", null);
 					return NIL;
 				}
 				int tier = tierV.toint();
 				if (tier < 1 || tier > 4) {
 					Gdx.app.error(TAG, "register_talent '" + id + "': tier must be 1-4, got "
 							+ tier + ", skipping");
+					registerRejected("register_talent '" + id + "': tier must be 1-4, got " + tier, null);
 					return NIL;
 				}
 				// M8d3: tier↔key is exclusive — exactly one of class/subclass/armor_ability
@@ -1068,6 +1183,8 @@ public class LuaEngine implements ResourceFinder {
 					if (keyCount != 1 || !hasClass) {
 						Gdx.app.error(TAG, "register_talent '" + id + "': tier " + tier
 								+ " requires exactly 'class' (no subclass/armor_ability), skipping");
+						registerRejected("register_talent '" + id + "': tier " + tier
+								+ " requires exactly 'class' (no subclass/armor_ability)", null);
 						return NIL;
 					}
 					String className = classV.tojstring();
@@ -1076,12 +1193,15 @@ public class LuaEngine implements ResourceFinder {
 					} catch (IllegalArgumentException e) {
 						Gdx.app.error(TAG, "register_talent '" + id + "': unknown class '"
 								+ className + "', skipping");
+						registerRejected("register_talent '" + id + "': unknown class '" + className + "'", null);
 						return NIL;
 					}
 				} else if (tier == 3) {
 					if (keyCount != 1 || !hasSubClass) {
 						Gdx.app.error(TAG, "register_talent '" + id + "': tier 3 requires exactly 'subclass'"
 								+ " (no class/armor_ability), skipping");
+						registerRejected("register_talent '" + id + "': tier 3 requires exactly 'subclass'"
+								+ " (no class/armor_ability)", null);
 						return NIL;
 					}
 					String subName = subClassV.tojstring();
@@ -1090,12 +1210,15 @@ public class LuaEngine implements ResourceFinder {
 					} catch (IllegalArgumentException e) {
 						Gdx.app.error(TAG, "register_talent '" + id + "': unknown subclass '"
 								+ subName + "', skipping");
+						registerRejected("register_talent '" + id + "': unknown subclass '" + subName + "'", null);
 						return NIL;
 					}
 				} else { // tier == 4
 					if (keyCount != 1 || !hasArmorAbil) {
 						Gdx.app.error(TAG, "register_talent '" + id + "': tier 4 requires exactly 'armor_ability'"
 								+ " (no class/subclass), skipping");
+						registerRejected("register_talent '" + id + "': tier 4 requires exactly 'armor_ability'"
+								+ " (no class/subclass)", null);
 						return NIL;
 					}
 					armorAbilityName = armorAbilV.tojstring();
@@ -1111,6 +1234,8 @@ public class LuaEngine implements ResourceFinder {
 				if (!(nameV instanceof org.luaj.vm2.LuaString) && !(titleV instanceof org.luaj.vm2.LuaString)) {
 					Gdx.app.error(TAG, "register_talent '" + id
 							+ "': missing/non-string 'name' (or 'title') — MOD_ talents have no .title properties key, skipping");
+					registerRejected("register_talent '" + id
+							+ "': missing/non-string 'name' (or 'title') — MOD_ talents have no .title properties key", null);
 					return NIL;
 				}
 				// M8d2: on_upgrade callback (optional). Non-function values
@@ -1121,12 +1246,17 @@ public class LuaEngine implements ResourceFinder {
 				LuaValue onUpgradeRaw = tbl.get("on_upgrade");
 				LuaValue onUpgrade = onUpgradeRaw.isfunction() ? onUpgradeRaw : null;
 				boolean registered = LuaTalentRegistry.register(talent, tier, cls, subClass, armorAbilityName, onUpgrade);
-				if (!registered) return NIL;
+				if (!registered) {
+					registerRejected("register_talent '" + id + "': registry rejected the tier injection", null);
+					return NIL;
+				}
 				// Forward desc/maxPoints/title(name) to the M7e override path so
 				// Talent.maxPoints()/desc()/title() reuse the existing fallback.
 				LuaTalentOverride.register(talent, tbl);
+				registerSucceeded("talents");
 			} catch (Exception e) {
 				Gdx.app.error(TAG, "register_talent rejected a malformed definition", e);
+				registerRejected("register_talent", e);
 			}
 			return NIL;
 		}

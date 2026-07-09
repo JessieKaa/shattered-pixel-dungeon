@@ -9,12 +9,19 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
  * Scans {@code assets/mods/<id>/mod.json} manifests and applies the version gate. This is the
  * M5a discovery layer: it produces {@link ModManifest} list consumed by {@link ModRegistry}.
+ *
+ * <p>M16c: scanner now returns a {@link ScanResult} that also carries diagnostics for skipped
+ * directories (bad manifest, id mismatch, duplicate id, version mismatch, external shadowed by
+ * builtin). These diagnostics use a stable key {@code scan:<origin>:<dirname>} so they never
+ * collide with legitimate mod ids in the registry's diagnostics map.
  *
  * <p>Design constraints (see docs/PLAN-modding-m5a-mod-manifest.md):
  * <ul>
@@ -36,13 +43,13 @@ public final class ModScanner {
 
 	private ModScanner() {}
 
-	public static List<ModManifest> scan() {
+	public static ScanResult scan() {
 		if (Gdx.files == null) {
 			safeLog(TAG, "Gdx.files null, mod scan skipped", null);
-			return Collections.emptyList();
+			return new ScanResult(Collections.emptyList(), Collections.emptyMap());
 		}
-		List<ModManifest> builtin = scanChildren(listModDirs(), ModManifest.Origin.BUILTIN);
-		List<ModManifest> external = scanExternal(externalModsRoot());
+		ScanResult builtin = scanChildren(listModDirs(), ModManifest.Origin.BUILTIN);
+		ScanResult external = scanExternalResult(externalModsRoot());
 		return mergeById(builtin, external);
 	}
 
@@ -64,12 +71,21 @@ public final class ModScanner {
 	/**
 	 * Scan {@code baseDir} (the external {@code mods_user/} root) for external mods (M12a). Each
 	 * admitted manifest is annotated {@link ModManifest.Origin#EXTERNAL} with {@code baseDir} set
-	 * to its own {@code mods_user/<id>} directory. Missing/null base dir → empty list (a brand-new
-	 * install has no {@code mods_user/} yet; it is created on first import, which is M12b/c).
+	 * to its own {@code mods_user/<id>} directory. Missing/null base dir → empty result.
+	 */
+	static ScanResult scanExternalResult(FileHandle baseDir) {
+		if (baseDir == null || !baseDir.exists()) {
+			return new ScanResult(Collections.emptyList(), Collections.emptyMap());
+		}
+		return scanChildren(baseDir.list(), ModManifest.Origin.EXTERNAL);
+	}
+
+	/**
+	 * Backwards-compatible seam used by tests that only need manifests. Delegates to
+	 * {@link #scanExternalResult(FileHandle)} and drops diagnostics.
 	 */
 	static List<ModManifest> scanExternal(FileHandle baseDir) {
-		if (baseDir == null || !baseDir.exists()) return Collections.emptyList();
-		return scanChildren(baseDir.list(), ModManifest.Origin.EXTERNAL);
+		return scanExternalResult(baseDir).manifests;
 	}
 
 	/**
@@ -78,25 +94,31 @@ public final class ModScanner {
 	 * throws) so a stale external copy cannot shadow the packaged version. Distinct external ids
 	 * are appended after builtin (scan order: builtin first, then external).
 	 */
-	static List<ModManifest> mergeById(List<ModManifest> builtin, List<ModManifest> external) {
-		List<ModManifest> out = new ArrayList<>(builtin.size() + (external == null ? 0 : external.size()));
+	static ScanResult mergeById(ScanResult builtin, ScanResult external) {
+		List<ModManifest> out = new ArrayList<>(builtin.manifests.size() + (external.manifests == null ? 0 : external.manifests.size()));
+		Map<String, ModDiagnostics> diagnostics = new LinkedHashMap<>();
+		if (builtin.diagnostics != null) diagnostics.putAll(builtin.diagnostics);
+		if (external.diagnostics != null) diagnostics.putAll(external.diagnostics);
 		Set<String> seen = new HashSet<>();
-		if (builtin != null) {
-			for (ModManifest m : builtin) {
+		if (builtin.manifests != null) {
+			for (ModManifest m : builtin.manifests) {
 				out.add(m);
 				seen.add(m.id);
 			}
 		}
-		if (external != null) {
-			for (ModManifest m : external) {
+		if (external.manifests != null) {
+			for (ModManifest m : external.manifests) {
 				if (!seen.add(m.id)) {
 					safeLog(TAG, "external mod " + m.id + " shadowed by builtin, skip", null);
+					diagnostics.computeIfAbsent(scanKey(m.origin, m.id),
+							k -> new ModDiagnostics().setDeclaredId(m.id))
+							.addWarning("external shadowed by builtin id " + m.id);
 					continue;
 				}
 				out.add(m);
 			}
 		}
-		return out;
+		return new ScanResult(out, diagnostics);
 	}
 
 	/**
@@ -137,18 +159,25 @@ public final class ModScanner {
 		return new FileHandle[0];
 	}
 
-	public static List<ModManifest> scanDir(FileHandle baseDir) {
+	public static ScanResult scanDirResult(FileHandle baseDir) {
 		if (baseDir == null || !baseDir.exists()) {
-			return Collections.emptyList();
+			return new ScanResult(Collections.emptyList(), Collections.emptyMap());
 		}
 		return scanChildren(baseDir.list(), ModManifest.Origin.BUILTIN);
 	}
 
-	private static List<ModManifest> scanChildren(FileHandle[] rawChildren, ModManifest.Origin origin) {
+	/**
+	 * Backwards-compatible seam used by tests that only need manifests. Delegates to
+	 * {@link #scanDirResult(FileHandle)} and drops diagnostics.
+	 */
+	public static List<ModManifest> scanDir(FileHandle baseDir) {
+		return scanDirResult(baseDir).manifests;
+	}
+
+	private static ScanResult scanChildren(FileHandle[] rawChildren, ModManifest.Origin origin) {
 		if (rawChildren == null || rawChildren.length == 0) {
-			return Collections.emptyList();
+			return new ScanResult(Collections.emptyList(), Collections.emptyMap());
 		}
-		// File-system list order is not a stable contract; sort for deterministic UI/tests.
 		FileHandle[] children = rawChildren.clone();
 		Arrays.sort(children, (a, b) -> {
 			String an = a != null ? a.name() : "";
@@ -157,33 +186,51 @@ public final class ModScanner {
 		});
 
 		List<ModManifest> mods = new ArrayList<>();
+		Map<String, ModDiagnostics> diagnostics = new LinkedHashMap<>();
 		Set<String> seen = new HashSet<>();
 		for (FileHandle child : children) {
 			if (child == null || !child.isDirectory()) continue;
+			String dirName = child.name();
 			FileHandle manifest = child.child(MANIFEST_NAME);
 			if (!manifest.exists() || manifest.isDirectory()) continue;
 			try {
 				ModManifest m = ModManifest.fromJson(new JsonReader().parse(manifest.readString("UTF-8")));
-				if (!m.id.equals(child.name())) {
-					safeLog(TAG, "mod dir " + child.name() + " declares id " + m.id + ", skip", null);
+				if (!m.id.equals(dirName)) {
+					safeLog(TAG, "mod dir " + dirName + " declares id " + m.id + ", skip", null);
+					diagnostics.computeIfAbsent(scanKey(origin, dirName),
+							k -> new ModDiagnostics().setDeclaredId(m.id))
+							.addError("id mismatch: declared " + m.id + " vs dir " + dirName);
 					continue;
 				}
 				if (!seen.add(m.id)) {
 					safeLog(TAG, "duplicate mod id " + m.id + ", skip", null);
+					diagnostics.computeIfAbsent(scanKey(origin, dirName),
+							k -> new ModDiagnostics().setDeclaredId(m.id))
+							.addError("duplicate id " + m.id + " skipped");
 					continue;
 				}
 				if (m.spd_version != Game.versionCode) {
 					safeLog(TAG, "mod " + m.id + " spd_version=" + m.spd_version
 							+ " != " + Game.versionCode + ", skip", null);
+					diagnostics.computeIfAbsent(scanKey(origin, dirName),
+							k -> new ModDiagnostics().setDeclaredId(m.id))
+							.addWarning("spd_version " + m.spd_version + " != " + Game.versionCode);
 					continue;
 				}
 				m.setRuntimeMeta(origin, child);
 				mods.add(m);
 			} catch (Exception e) {
 				safeLog(TAG, "mod manifest parse fail: " + child.path(), e);
+				diagnostics.computeIfAbsent(scanKey(origin, dirName),
+						k -> new ModDiagnostics())
+						.addError("manifest parse: " + e.getMessage());
 			}
 		}
-		return mods;
+		return new ScanResult(mods, diagnostics);
+	}
+
+	private static String scanKey(ModManifest.Origin origin, String dirName) {
+		return "scan:" + origin.name() + ":" + dirName;
 	}
 
 	// Gdx.app may itself be null in early/headless misconfigured launches; fall back to stderr
@@ -195,6 +242,20 @@ public final class ModScanner {
 		} else {
 			System.err.println(tag + ": " + msg);
 			if (t != null) t.printStackTrace(System.err);
+		}
+	}
+
+	/**
+	 * M16c: scanner result carrying discovered manifests plus diagnostics for directories that
+	 * were skipped during scan.
+	 */
+	public static final class ScanResult {
+		public final List<ModManifest> manifests;
+		public final Map<String, ModDiagnostics> diagnostics;
+
+		public ScanResult(List<ModManifest> manifests, Map<String, ModDiagnostics> diagnostics) {
+			this.manifests = manifests != null ? manifests : Collections.emptyList();
+			this.diagnostics = diagnostics != null ? diagnostics : Collections.emptyMap();
 		}
 	}
 }

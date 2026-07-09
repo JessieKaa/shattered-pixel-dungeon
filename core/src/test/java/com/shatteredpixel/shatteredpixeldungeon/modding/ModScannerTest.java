@@ -219,6 +219,23 @@ public class ModScannerTest {
 	}
 
 	@Test
+	public void scan_recordsDiagnosticsForSkippedDirs() throws IOException {
+		// M16c: a skipped dir produces a diagnostic under a stable scan key so the manager can
+		// surface WHY it was skipped (parse fail / version mismatch / id mismatch).
+		File modsDir = newModsDir();
+		buildMod(modsDir, "broken", "{'id':'broken','name':'x'}");                 // parse fail
+		buildMod(modsDir, "old_mod", manifest("old_mod", 999, false));             // version mismatch
+		buildMod(modsDir, "foo", manifest("bar", TEST_VERSION_CODE, false));       // id mismatch
+		ModScanner.ScanResult result = ModScanner.scanDirResult(new FileHandle(modsDir));
+
+		assertTrue(result.manifests.isEmpty());
+		assertTrue("broken parse-fail diagnostic", result.diagnostics.containsKey("scan:BUILTIN:broken"));
+		assertTrue("old_mod version diagnostic", result.diagnostics.containsKey("scan:BUILTIN:old_mod"));
+		assertEquals("id mismatch captures the declared id", "bar",
+				result.diagnostics.get("scan:BUILTIN:foo").declaredId());
+	}
+
+	@Test
 	public void scan_skipsWrongTypeFields() throws IOException {
 		File modsDir = newModsDir();
 		// string spd_version (type error) -> skip; sibling good mod kept
@@ -249,7 +266,7 @@ public class ModScannerTest {
 		com.badlogic.gdx.Files saved = Gdx.files;
 		Gdx.files = null;
 		try {
-			assertTrue("scan() must not NPE when Gdx.files is null", ModScanner.scan().isEmpty());
+			assertTrue("scan() must not NPE when Gdx.files is null", ModScanner.scan().manifests.isEmpty());
 		} finally {
 			Gdx.files = saved;
 		}
@@ -288,9 +305,9 @@ public class ModScannerTest {
 		buildMod(externalDir, "shared", manifest("shared", TEST_VERSION_CODE, false));
 		buildMod(externalDir, "ext_only", manifest("ext_only", TEST_VERSION_CODE, false));
 
-		List<ModManifest> builtin = ModScanner.scanDir(new FileHandle(builtinDir));
-		List<ModManifest> external = ModScanner.scanExternal(new FileHandle(externalDir));
-		List<ModManifest> merged = ModScanner.mergeById(builtin, external);
+		ModScanner.ScanResult builtin = ModScanner.scanDirResult(new FileHandle(builtinDir));
+		ModScanner.ScanResult external = ModScanner.scanExternalResult(new FileHandle(externalDir));
+		List<ModManifest> merged = ModScanner.mergeById(builtin, external).manifests;
 
 		assertEquals("both ids present after merge", Set.of("shared", "ext_only"), ids(merged));
 		ModManifest shared = byId(merged, "shared");

@@ -85,6 +85,15 @@ public class WndModManager extends Window {
 		TXT_ZH.put("cancel", "取消");
 		TXT_ZH.put("builtin_no_uninstall", "内建模组不可卸载。");
 		TXT_ZH.put("err_uninstall", "卸载失败(%s)。");
+		// M16c: per-mod diagnostics (status tags + details window + scan problems)
+		TXT_ZH.put("details_button", "详情");
+		TXT_ZH.put("status_loaded", "已加载");
+		TXT_ZH.put("status_warnings", "有警告");
+		TXT_ZH.put("status_failed", "加载失败");
+		TXT_ZH.put("status_disabled", "已停用");
+		TXT_ZH.put("status_discovered", "已发现");
+		TXT_ZH.put("scan_problems_title", "扫描问题");
+		TXT_ZH.put("scan_problems_empty", "没有扫描问题。");
 		TXT_EN.put("title", "Mods");
 		TXT_EN.put("empty", "No mods found.");
 		TXT_EN.put("hint", "Long-press an external mod to uninstall. Changes apply after restart.");
@@ -111,6 +120,15 @@ public class WndModManager extends Window {
 		TXT_EN.put("cancel", "Cancel");
 		TXT_EN.put("builtin_no_uninstall", "Built-in mods cannot be uninstalled.");
 		TXT_EN.put("err_uninstall", "Uninstall failed (%s).");
+		// M16c: per-mod diagnostics (status tags + details window + scan problems)
+		TXT_EN.put("details_button", "Info");
+		TXT_EN.put("status_loaded", "loaded");
+		TXT_EN.put("status_warnings", "warnings");
+		TXT_EN.put("status_failed", "failed");
+		TXT_EN.put("status_disabled", "disabled");
+		TXT_EN.put("status_discovered", "discovered");
+		TXT_EN.put("scan_problems_title", "Scan Problems");
+		TXT_EN.put("scan_problems_empty", "No scan problems.");
 	}
 
 	private static String txt(String key) {
@@ -142,6 +160,41 @@ public class WndModManager extends Window {
 	private static String originTag(ModManifest mod) {
 		boolean external = mod.origin == ModManifest.Origin.EXTERNAL;
 		return txt(external ? "origin_external" : "origin_builtin");
+	}
+
+	/** M16c: localized status tag for a mod's current diagnostic status. Falls back to the
+	 *  "discovered" tag when no diagnostics have been recorded (e.g. engine not yet initialized). */
+	static String statusTag(ModDiagnostics diag) {
+		if (diag == null) return txt("status_discovered");
+		switch (diag.status()) {
+			case LOADED:    return txt("status_loaded");
+			case WARNINGS:  return txt("status_warnings");
+			case FAILED:    return txt("status_failed");
+			case DISABLED:  return txt("status_disabled");
+			default:        return txt("status_discovered");
+		}
+	}
+
+	/** M16c: localized status tag for a diagnostics snapshot — shared with {@link WndModDetails}. */
+	static String statusTagFor(ModDiagnostics diag) {
+		return statusTag(diag);
+	}
+
+	/** M16c: status tag for a real mod — reads its diagnostics (may be null pre-init). */
+	private static String statusTag(ModManifest mod) {
+		return statusTag(ModRegistry.getDiagnostics(mod.id));
+	}
+
+	/** M16c: derive a readable name for an orphan (scan-problem) diagnostic. Orphan keys are
+	 *  {@code scan:<origin>:<dirname>}; prefer the manifest's declared id (captured at scan time
+	 *  when one could be parsed), else fall back to the directory name. */
+	private static String orphanDisplayName(String orphanKey, ModDiagnostics diag) {
+		if (diag != null && diag.declaredId() != null && !diag.declaredId().isEmpty()) {
+			return diag.declaredId();
+		}
+		int c1 = orphanKey.indexOf(':');
+		int c2 = orphanKey.indexOf(':', c1 + 1);
+		return c2 >= 0 ? orphanKey.substring(c2 + 1) : orphanKey;
 	}
 
 	/** M12b: single-line import result block, updated from the picker callback (render thread). */
@@ -187,11 +240,26 @@ public class WndModManager extends Window {
 			content.add(empty);
 			y = empty.bottom() + MARGIN;
 		} else {
+			// M16c: reserve a right-edge strip for a per-row "details" button so the row carries
+			// both the enable checkbox and an entry into WndModDetails. Long-press (uninstall,
+			// M13a) still lives on the checkbox; the details button only handles short clicks.
+			final float detailsW = 24;
+			float boxW = WIDTH - MARGIN * 2 - detailsW - MARGIN;
 			for (ModManifest mod : mods) {
 				ModCheckBox box = new ModCheckBox(mod);
 				box.checked(ModRegistry.isEnabled(mod.id));
-				box.setRect(MARGIN, y, WIDTH - MARGIN * 2, CHECK_HEIGHT);
+				box.setRect(MARGIN, y, boxW, CHECK_HEIGHT);
 				content.add(box);
+
+				RedButton details = new RedButton(txt("details_button"), 6) {
+					@Override
+					protected void onClick() {
+						GameScene.show(new WndModDetails(mod));
+					}
+				};
+				details.setRect(MARGIN + boxW + MARGIN, y, detailsW, CHECK_HEIGHT);
+				details.enable(true);
+				content.add(details);
 				y = box.bottom() + CHECK_GAP;
 
 				if (mod.description != null && !mod.description.isEmpty()) {
@@ -202,6 +270,35 @@ public class WndModManager extends Window {
 					content.add(desc);
 					y = desc.bottom() + DESC_GAP;
 				}
+			}
+		}
+
+		// M16c: "scan problems" area — orphan diagnostics (bad manifests, skipped dirs, etc.) that
+		// never produced a manifest, so they are absent from ModRegistry.all(). Each opens a details
+		// window so the player can see WHY a directory was skipped without adb/logcat.
+		Map<String, ModDiagnostics> orphans = ModRegistry.orphanDiagnostics();
+		if (!orphans.isEmpty()) {
+			RenderedTextBlock problemsTitle = PixelScene.renderTextBlock(txt("scan_problems_title"), 8);
+			problemsTitle.maxWidth(WIDTH - MARGIN * 2);
+			problemsTitle.hardlight(0xFFAA88);
+			problemsTitle.setPos(MARGIN, y);
+			content.add(problemsTitle);
+			y = problemsTitle.bottom() + CHECK_GAP;
+
+			for (Map.Entry<String, ModDiagnostics> e : orphans.entrySet()) {
+				final String orphanKey = e.getKey();
+				final ModDiagnostics diag = e.getValue();
+				int errWarn = (diag == null ? 0 : diag.errors().size()) + (diag == null ? 0 : diag.warnings().size());
+				String label = orphanDisplayName(orphanKey, diag) + " (" + errWarn + ")";
+				RedButton row = new RedButton(label, 7) {
+					@Override
+					protected void onClick() {
+						GameScene.show(new WndModDetails(orphanKey, diag));
+					}
+				};
+				row.setRect(MARGIN, y, WIDTH - MARGIN * 2, CHECK_HEIGHT);
+				content.add(row);
+				y = row.bottom() + CHECK_GAP;
 			}
 		}
 		content.setRect(0, 0, WIDTH, y);
@@ -275,7 +372,7 @@ public class WndModManager extends Window {
 		private final ModManifest mod;
 
 		ModCheckBox(ModManifest mod) {
-			super(mod.name + " v" + mod.version + " " + originTag(mod));
+			super(mod.name + " v" + mod.version + " " + originTag(mod) + " [" + statusTag(mod) + "]");
 			this.mod = mod;
 		}
 
