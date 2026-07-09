@@ -166,6 +166,12 @@ public class RemixedFullPackTest {
         assertTrue("alpha hub level registered",
                 LuaLevelRegistry.contains("remixed_full_alpha_hub"));
 
+        // M17c: tavern + chapel showcase levels register alongside the hub.
+        assertTrue("tavern level registered",
+                LuaLevelRegistry.contains("remixed_full_tavern"));
+        assertTrue("chapel level registered",
+                LuaLevelRegistry.contains("remixed_full_chapel"));
+
         // M17a: 6 town NPCs (degraded ports of remished town NPCs — dialog/yell only).
         assertTrue("drunkard NPC registered",
                 LuaNpcRegistry.contains("remixed_full_drunkard"));
@@ -340,6 +346,101 @@ public class RemixedFullPackTest {
 
         DataDrivenLevel lvl = DataDrivenLevel.fromAsset(HUB_ASSET, "remixed_full_alpha_hub");
         assertNotNull("fromAsset must parse the hub without throwing", lvl);
+    }
+
+    // ---------------- M17c: tavern + chapel levels build cleanly + positions valid ----------------
+
+    /**
+     * M17c the two new showcase levels (tavern, chapel) are structurally valid JSON AND every
+     * mob/item position lands on a passable, non-solid cell once the map is built. This is
+     * stronger than the registry-level asserts in {@link #enabled_loadsFullAlphaManifest}: a mob
+     * spec whose {@code pos} sits on a wall/bookshelf/statue is silently skipped at runtime
+     * ({@code DataDrivenLevel.createMobs} logs and continues), so a pure registration test would
+     * not catch it. Building the map via {@code build()} resolves every tile name, then each
+     * mob/item cell is checked against the authoritative {@link Terrain#flags} for PASSABLE/SOLID.
+     *
+     * <p>Independent of Lua engine state: {@code build()} only needs the parsed JSON fields (it
+     * does not call {@code createMobs}/{@code createItems}), so this runs without
+     * {@code enableRemixedFull()}/{@code LuaEngine.init()}.
+     */
+    @Test
+    public void m17c_levels_areStructurallyValidAndPositionsPassable() {
+        String[][] levels = {
+                {"mods/levels/remixed_full_tavern.json", "remixed_full_tavern"},
+                {"mods/levels/remixed_full_chapel.json", "remixed_full_chapel"},
+        };
+        for (String[] meta : levels) {
+            String asset = meta[0];
+            String id = meta[1];
+
+            JsonValue root = new JsonReader().parse(Gdx.files.internal(asset).readString("UTF-8"));
+            assertEquals(id, root.getString("id"));
+            assertEquals("16x16 width", 16, root.getInt("width"));
+            assertEquals("16x16 height", 16, root.getInt("height"));
+            assertEquals("256 tiles", 256, root.require("tiles").size);
+            assertTrue("custom levels are safe/ephemeral", root.getBoolean("safe"));
+
+            int entrance = root.getInt("entrance");
+            int exit = root.getInt("exit");
+            String[] tiles = tilesArray(root.require("tiles"));
+            assertEquals("entrance cell carries an entrance tile", "entrance", tiles[entrance]);
+            assertEquals("exit cell carries an exit tile", "exit", tiles[exit]);
+
+            DataDrivenLevel built = DataDrivenLevel.fromAsset(asset, id);
+            assertNotNull("fromAsset must parse " + id, built);
+            // build() allocates map[] via setSize and resolves every tile name; if a tile name
+            // were unknown it would have logged + defaulted to wall, and a length mismatch would
+            // have thrown in fromJsonValue — so reaching here means the definition is sound.
+            built.build();
+            assertNotNull("map allocated for " + id, built.map);
+            assertEquals("map length for " + id, 256, built.map.length);
+
+            // Validate passability directly against the authoritative Terrain flags rather than
+            // buildFlagMaps(), which also needs openSpace[] (not allocated by setSize) and a sized
+            // PathFinder — engine bookkeeping irrelevant to this data-level invariant.
+            assertTrue("entrance must be passable in " + id,
+                    (Terrain.flags[built.map[entrance]] & Terrain.PASSABLE) != 0);
+            assertTrue("exit must be passable in " + id,
+                    (Terrain.flags[built.map[exit]] & Terrain.PASSABLE) != 0);
+
+            JsonValue mobsArr = root.require("mobs");
+            assertTrue(id + " should place at least one mob", mobsArr.size > 0);
+            for (JsonValue m = mobsArr.child; m != null; m = m.next) {
+                int pos = m.getInt("pos");
+                int t = built.map[pos];
+                assertTrue(id + " mob " + m.getString("type") + " @" + pos + " must be passable",
+                        (Terrain.flags[t] & Terrain.PASSABLE) != 0);
+                assertFalse(id + " mob " + m.getString("type") + " @" + pos + " must not be solid",
+                        (Terrain.flags[t] & Terrain.SOLID) != 0);
+            }
+            JsonValue itemsArr = root.get("items");
+            for (JsonValue it = itemsArr != null ? itemsArr.child : null; it != null; it = it.next) {
+                int pos = it.getInt("pos");
+                assertFalse(id + " item " + it.getString("type") + " @" + pos + " must not be solid",
+                        (Terrain.flags[built.map[pos]] & Terrain.SOLID) != 0);
+            }
+        }
+    }
+
+    /**
+     * M17c every npc/shop id referenced by the tavern + chapel JSONs exists in its registry once
+     * remixed_full is enabled, so the levels have no dangling references at runtime.
+     */
+    @Test
+    public void m17c_levels_referenceOnlyRegisteredNpcsAndShops() throws Exception {
+        enableRemixedFull();
+        LuaEngine.init();
+
+        // Tavern: drunkard / bard / barman + the shared alpha shop.
+        assertTrue("tavern drunkard NPC exists", LuaNpcRegistry.contains("remixed_full_drunkard"));
+        assertTrue("tavern bard NPC exists",     LuaNpcRegistry.contains("remixed_full_bard"));
+        assertTrue("tavern barman NPC exists",   LuaNpcRegistry.contains("remixed_full_barman"));
+        assertTrue("tavern shop exists",         LuaShopRegistry.contains("remixed_full_alpha_shop"));
+
+        // Chapel: bishop / inquirer / black_cat.
+        assertTrue("chapel bishop NPC exists",    LuaNpcRegistry.contains("remixed_full_bishop"));
+        assertTrue("chapel inquirer NPC exists",  LuaNpcRegistry.contains("remixed_full_inquirer"));
+        assertTrue("chapel black_cat NPC exists", LuaNpcRegistry.contains("remixed_full_black_cat"));
     }
 
     // ---------------- disabled: registries empty + no vanilla pollution ----------------
