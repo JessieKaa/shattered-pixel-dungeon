@@ -141,6 +141,24 @@ public class LuaModEntryTest {
 		assertFalse("missing entry file must not register anything", LuaItemRegistry.contains("test_mod_item"));
 	}
 
+	// ---------------- M16c: entry runtime error records a diagnostic ----------------
+
+	@Test
+	public void entry_withRuntimeError_recordsError() throws Exception {
+		File modsDir = newModsDir();
+		buildMod(modsDir, "boommod", manifest("boommod", "boom.lua"));
+		writeScript(modsDir, "boommod", "boom.lua", "error(\"boom\")");
+		ModRegistry.scanDir(new FileHandle(modsDir));
+		assertNotNull(ModRegistry.get("boommod"));
+
+		LuaEngine.init();
+
+		ModDiagnostics diag = ModRegistry.getDiagnostics("boommod");
+		assertNotNull("a diagnostic must exist for the mod whose entry errored", diag);
+		assertEquals("entry runtime error => FAILED", ModDiagnostics.Status.FAILED, diag.status());
+		assertFalse("entry error text must be recorded", diag.errors().isEmpty());
+	}
+
 	// ---------------- entry path validation (ModManifest) ----------------
 
 	@Test
@@ -185,6 +203,13 @@ public class LuaModEntryTest {
 		modDir.mkdirs();
 		Files.write(new File(modDir, "mod.json").toPath(),
 				singleQuoteManifestJson.replace('\'', '"').getBytes(StandardCharsets.UTF_8));
+	}
+
+	/** Write a Lua file at the mod dir root (used for entry scripts that should error at runtime). */
+	private static void writeScript(File modsDir, String dirName, String scriptName, String body) throws IOException {
+		File modDir = new File(modsDir, dirName);
+		modDir.mkdirs();
+		Files.write(new File(modDir, scriptName).toPath(), body.getBytes(StandardCharsets.UTF_8));
 	}
 
 	/**
