@@ -6,5 +6,8 @@
   "author": "fork",
   "default_enabled": false,
   "entry": "init.lua",
-  "description": "M0-M4 测试内容(剑/NPC/商店/城镇)的占位清单"
+  "description": "M0-M4 测试内容(剑/NPC/商店/城镇)的占位清单",
+  "balance": {
+    "lua_item_drop_prob": 100
+  }
 }

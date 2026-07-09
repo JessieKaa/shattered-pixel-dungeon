@@ -21,6 +21,7 @@
 
 package com.shatteredpixel.shatteredpixeldungeon.items;
 
+import com.badlogic.gdx.Gdx;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.items.armor.Armor;
 import com.shatteredpixel.shatteredpixeldungeon.items.armor.ClericArmor;
@@ -631,6 +632,13 @@ public class Generator {
 	private static HashMap<Category,Float> defaultCatProbs = new LinkedHashMap<>();
 	private static HashMap<Category,Float> categoryProbs = new LinkedHashMap<>();
 
+	// Fork (M15a): runtime override for LUA_ITEM drop probability. These fields are
+	// deliberately not persisted into the bundle — they are re-applied from mod
+	// balance every game/reset, so save/load remains compatible and toggling mods
+	// takes effect immediately. Negative values are clamped to 0.
+	private static float luaFirstProb = 0f;
+	private static float luaSecondProb = 0f;
+
 	public static void fullReset() {
 		usingFirstDeck = Random.Int(2) == 0;
 		generalReset();
@@ -649,6 +657,29 @@ public class Generator {
 			categoryProbs.put( cat, usingFirstDeck ? cat.firstProb : cat.secondProb );
 			defaultCatProbs.put( cat, cat.firstProb + cat.secondProb );
 		}
+		// Fork (M15a): re-apply the runtime LUA_ITEM override after every deck switch.
+		categoryProbs.put(Category.LUA_ITEM, usingFirstDeck ? luaFirstProb : luaSecondProb);
+	}
+
+	/**
+	 * Fork (M15a): set the runtime drop probability for the LUA_ITEM category.
+	 * The override is applied to the current deck and remembered so that
+	 * subsequent {@link #generalReset()} calls (e.g. deck switches during
+	 * {@link #fullReset()} or save/load re-initialisation) keep it active.
+	 * Negative inputs are clamped to 0 and logged; NaN is also clamped.
+	 */
+	public static void setLuaItemProbability(float first, float second) {
+		if (first < 0 || Float.isNaN(first)) {
+			Gdx.app.error("Generator", "setLuaItemProbability first=" + first + " is invalid, clamping to 0");
+			first = 0f;
+		}
+		if (second < 0 || Float.isNaN(second)) {
+			Gdx.app.error("Generator", "setLuaItemProbability second=" + second + " is invalid, clamping to 0");
+			second = 0f;
+		}
+		luaFirstProb = first;
+		luaSecondProb = second;
+		categoryProbs.put(Category.LUA_ITEM, usingFirstDeck ? luaFirstProb : luaSecondProb);
 	}
 
 	public static void reset(Category cat){
@@ -959,6 +990,12 @@ public class Generator {
 				}
 			}
 		}
+
+		// Fork (M15a): lua_item_drop_prob is a runtime-only override. The bundle
+		// stores whatever categoryProbs contained at save time, which may include
+		// a stale LUA_ITEM probability; always re-apply the current runtime value
+		// so toggling a mod or starting a new game takes effect immediately.
+		categoryProbs.put(Category.LUA_ITEM, usingFirstDeck ? luaFirstProb : luaSecondProb);
 
 		for (Category cat : Category.values()){
 			if (bundle.contains(cat.name().toLowerCase() + CATEGORY_PROBS)){

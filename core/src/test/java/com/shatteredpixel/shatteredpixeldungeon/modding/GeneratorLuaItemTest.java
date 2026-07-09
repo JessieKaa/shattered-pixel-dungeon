@@ -2,6 +2,8 @@ package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import com.shatteredpixel.shatteredpixeldungeon.items.Generator;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
+import com.watabou.utils.Bundle;
+import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -24,11 +26,9 @@ import static org.junit.Assert.assertTrue;
  * {@link LuaItemRegistry}, and the pool must report empty (so Generator can fall
  * back) when no Lua scripts have run.
  *
- * <p>The deck-facing {@code Generator.random()} is NOT exercised here: the
- * {@code LUA_ITEM} category has firstProb/secondProb 0, so it is never selected
- * by the standard drop deck (C3 — original balance preserved). The desktop debug
- * run (PLAN Step 8) covers the in-game drop path with the probability temporarily
- * raised.
+ * <p>M15a: with {@code lua_item_drop_prob > 0} in enabled mod balance, the standard
+ * deck {@link Generator#random()} can also emit Lua items. The default
+ * firstProb/secondProb remain 0 so vanilla balance is preserved when no mod opts in.
  */
 public class GeneratorLuaItemTest {
 
@@ -48,6 +48,12 @@ public class GeneratorLuaItemTest {
     public void resetModAndLuaState() throws Exception {
         ModTestSupport.enableTestMod();
         ModTestSupport.resetLuaState();
+    }
+
+    @After
+    public void resetBalance() {
+        BalanceConfig.resetToDefaults();
+        Generator.setLuaItemProbability(0f, 0f);
     }
 
     @AfterClass
@@ -96,16 +102,56 @@ public class GeneratorLuaItemTest {
     }
 
     /**
-     * Equivalent automated coverage for PLAN Step 8 (desktop-debug "see a Lua item
-     * drop"). The autonomous worktree has no display, so instead of launching the
-     * game and killing monsters, this drives the real deck entry point
-     * {@link Generator#random()} with {@code LUA_ITEM} weighted as the only
-     * category — the exact path a monster drop takes. Verifies the full chain:
-     * deck → {@code Random.chances} → {@code random(LUA_ITEM)} → {@code randomLuaItem()}.
+     * M15a: when an enabled mod declares {@code balance.lua_item_drop_prob > 0},
+     * {@link Generator#random()} can roll LUA_ITEM and emit a Lua-defined item.
+     * test_mod's manifest sets the prob to 100 (large enough to dominate the deck).
      */
     @Test
-    public void deckRandomEmitsLuaItemWhenWeighted() throws Exception {
+    public void deckRandomEmitsLuaItemWithModBalance() throws Exception {
         LuaEngine.init();
+        assertTrue("test_mod must have enabled balance override",
+                BalanceConfig.LUA_ITEM_DROP_PROB > 0);
+
+        int luaHits = 0;
+        for (int i = 0; i < 40; i++) {
+            Item item = Generator.random();
+            assertNotNull(item);
+            if (item instanceof LuaItem || item instanceof LuaMaterial) luaHits++;
+        }
+        assertTrue("Generator.random() deck must emit Lua-defined items when lua_item_drop_prob > 0 "
+                        + "(got " + luaHits + "/40)",
+                luaHits >= 30);
+    }
+
+    /**
+     * M15a C3: when the mod is disabled, {@code lua_item_drop_prob} is not applied and
+     * the standard deck must never emit a Lua item.
+     */
+    @Test
+    public void deckRandomNoLuaItemWhenModDisabled() throws Exception {
+        ModRegistry.setEnabled("test_mod", false);
+        LuaEngine.init();
+
+        assertEquals("disabled mod must leave LUA_ITEM_DROP_PROB at default 0",
+                0f, BalanceConfig.LUA_ITEM_DROP_PROB, 0f);
+
+        for (int i = 0; i < 20; i++) {
+            Item item = Generator.random();
+            assertNotNull(item);
+            assertFalse("vanilla deck must not emit Lua items when no mod opts in (got "
+                            + item.getClass().getSimpleName() + ")",
+                    item instanceof LuaItem || item instanceof LuaMaterial);
+        }
+    }
+
+    /**
+     * M15a: {@link Generator#fullReset()} re-applies the runtime override after it
+     * switches decks, so Lua items keep dropping across deck switches.
+     */
+    @Test
+    public void luaItemProbabilityPersistsAcrossFullReset() throws Exception {
+        LuaEngine.init();
+        assertTrue(BalanceConfig.LUA_ITEM_DROP_PROB > 0);
 
         java.lang.reflect.Field f = Generator.class.getDeclaredField("categoryProbs");
         f.setAccessible(true);
@@ -113,20 +159,55 @@ public class GeneratorLuaItemTest {
         java.util.HashMap<Generator.Category, Float> probs =
                 (java.util.HashMap<Generator.Category, Float>) f.get(null);
 
-        Generator.generalReset();
-        for (Generator.Category c : Generator.Category.values()) {
-            probs.put(c, c == Generator.Category.LUA_ITEM ? 100f : 0f);
-        }
-
         int luaHits = 0;
-        for (int i = 0; i < 20; i++) {
+        for (int pass = 0; pass < 10; pass++) {
+            Generator.fullReset();
+            assertEquals("fullReset() must preserve lua_item_drop_prob override (pass " + pass + ")",
+                    BalanceConfig.LUA_ITEM_DROP_PROB,
+                    probs.get(Generator.Category.LUA_ITEM), 0f);
             Item item = Generator.random();
             assertNotNull(item);
             if (item instanceof LuaItem || item instanceof LuaMaterial) luaHits++;
         }
-        assertTrue("Generator.random() deck must emit Lua-defined items when LUA_ITEM is the only "
-                        + "weighted category (got " + luaHits + "/20)",
-                luaHits >= 15);
+        assertTrue("Lua items must drop across repeated fullReset() calls (got " + luaHits + "/10)",
+                luaHits >= 5);
+    }
+
+    /**
+     * M15a: lua_item_drop_prob is runtime-only. A bundle saved while the prob was
+     * non-zero must not resurrect that prob after the runtime override is cleared
+     * (e.g. mod disabled / new game).
+     */
+    @Test
+    public void luaItemProbabilityNotPersistedThroughBundle() throws Exception {
+        LuaEngine.init();
+        assertTrue(BalanceConfig.LUA_ITEM_DROP_PROB > 0);
+
+        java.lang.reflect.Field f = Generator.class.getDeclaredField("categoryProbs");
+        f.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.HashMap<Generator.Category, Float> probs =
+                (java.util.HashMap<Generator.Category, Float>) f.get(null);
+
+        // Save while prob is high.
+        Bundle bundle = new Bundle();
+        Generator.storeInBundle(bundle);
+
+        // Runtime override is cleared (e.g. user disabled the mod).
+        BalanceConfig.LUA_ITEM_DROP_PROB = 0f;
+        Generator.setLuaItemProbability(0f, 0f);
+
+        // Restore must re-apply the current runtime value, not the stale bundle value.
+        Generator.restoreFromBundle(bundle);
+        assertEquals("bundle restore must not persist stale LUA_ITEM probability",
+                0f, probs.get(Generator.Category.LUA_ITEM), 0f);
+
+        for (int i = 0; i < 10; i++) {
+            Item item = Generator.random();
+            assertNotNull(item);
+            assertFalse("restored game with cleared override must not drop Lua items",
+                    item instanceof LuaItem || item instanceof LuaMaterial);
+        }
     }
 
     /**
@@ -155,5 +236,36 @@ public class GeneratorLuaItemTest {
         Item mat = LuaItemPool.randomMaterial();
         assertNotNull("randomMaterial() must return a material when registered", mat);
         assertTrue("randomMaterial() must emit a LuaMaterial", mat instanceof LuaMaterial);
+    }
+
+    /**
+     * Legacy automated coverage for PLAN Step 8 (desktop-debug "see a Lua item
+     * drop"). Kept to prove the direct deck path works when LUA_ITEM is the only
+     * weighted category.
+     */
+    @Test
+    public void deckRandomEmitsLuaItemWhenWeighted() throws Exception {
+        LuaEngine.init();
+
+        java.lang.reflect.Field f = Generator.class.getDeclaredField("categoryProbs");
+        f.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.HashMap<Generator.Category, Float> probs =
+                (java.util.HashMap<Generator.Category, Float>) f.get(null);
+
+        Generator.generalReset();
+        for (Generator.Category c : Generator.Category.values()) {
+            probs.put(c, c == Generator.Category.LUA_ITEM ? 100f : 0f);
+        }
+
+        int luaHits = 0;
+        for (int i = 0; i < 20; i++) {
+            Item item = Generator.random();
+            assertNotNull(item);
+            if (item instanceof LuaItem || item instanceof LuaMaterial) luaHits++;
+        }
+        assertTrue("Generator.random() deck must emit Lua-defined items when LUA_ITEM is the only "
+                        + "weighted category (got " + luaHits + "/20)",
+                luaHits >= 15);
     }
 }
