@@ -166,10 +166,82 @@ public class RemixedFullPackTest {
         assertTrue("alpha hub level registered",
                 LuaLevelRegistry.contains("remixed_full_alpha_hub"));
 
+        // M17a: 6 town NPCs (degraded ports of remished town NPCs — dialog/yell only).
+        assertTrue("drunkard NPC registered",
+                LuaNpcRegistry.contains("remixed_full_drunkard"));
+        assertTrue("bard NPC registered",
+                LuaNpcRegistry.contains("remixed_full_bard"));
+        assertTrue("black_cat NPC registered",
+                LuaNpcRegistry.contains("remixed_full_black_cat"));
+        assertTrue("barman NPC registered",
+                LuaNpcRegistry.contains("remixed_full_barman"));
+        assertTrue("bishop NPC registered",
+                LuaNpcRegistry.contains("remixed_full_bishop"));
+        assertTrue("inquirer NPC registered",
+                LuaNpcRegistry.contains("remixed_full_inquirer"));
+
         assertEquals("10 items", 10, LuaItemRegistry.size());
         assertEquals("5 spells", 5, LuaSpellRegistry.size());
         assertEquals("6 mobs", 6, LuaMobRegistry.size());
+        assertEquals("6 town NPCs", 6, LuaNpcRegistry.size());
         assertEquals("1 shop", 1, LuaShopRegistry.size());
+    }
+
+    // ---------------- M17a: town NPCs use only fork-supported APIs ----------------
+
+    /**
+     * M17a forbidden-token lint: the 6 town-NPC scripts must not reference any API the fork
+     * does not expose (chooseOption / trade/quest/story windows / gold economy / Sfx-particle /
+     * luajava). This pins the Acceptance clause "仅用 {showDialog,npcYell,giveItem,leaveTown} 子集,
+     * 不依赖 fork 缺失 API" at the source-text level — a regression where a future edit reintroduces
+     * a remished-only call (e.g. {@code chooseOption} on barman) is caught here even if the NPC
+     * still registers. Mirrors the spirit of {@code LuaNpcTest#luajavaBindClassStillUnreachableWithNpcGlobalsInjected}.
+     *
+     * <p>Each script is read as raw text from the mod asset path and asserted free of the
+     * forbidden tokens. Reading text (not executing) keeps the lint independent of whether the
+     * engine init wired a given global — the point is to forbid the token from ever appearing.
+     */
+    @Test
+    public void townNpcs_useOnlyForkSupportedApis() {
+        String[] npcScripts = {
+                "mods/remixed_full/scripts/npcs/drunkard.lua",
+                "mods/remixed_full/scripts/npcs/bard.lua",
+                "mods/remixed_full/scripts/npcs/black_cat.lua",
+                "mods/remixed_full/scripts/npcs/barman.lua",
+                "mods/remixed_full/scripts/npcs/bishop.lua",
+                "mods/remixed_full/scripts/npcs/inquirer.lua",
+        };
+        // Fork LuaNpc has no dispatch for these (act/die/spawn/actionsList/execute are not routed),
+        // and RPD.* lacks the rest (chooseOption / *Window / economy / Sfx-particle / luajava).
+        // "Sfx" is matched as the dotted substring ".Sfx": remished only references it as
+        // RPD.Sfx.*, so the dotted form catches the call without false-positive on unrelated
+        // identifiers that merely contain the letters "Sfx". Other tokens are bare substrings.
+        String[] forbidden = {
+                "chooseOption", "showTradeWindow", "showQuestWindow", "showStoryWindow",
+                "spendGold", "uncurse", "pourSpeck", "speckEffectFactory", "playExtra",
+                "textById", "luajava", "playSound", ".Sfx", "setState", "setAi",
+        };
+        for (String path : npcScripts) {
+            String code = stripLuaLineComments(Gdx.files.internal(path).readString("UTF-8"));
+            for (String tok : forbidden) {
+                assertFalse(
+                        "town NPC " + path + " must not reference fork-missing API '" + tok
+                                + "' (Acceptance: dialog/npcYell/giveItem/leaveTown subset only)",
+                        code.contains(tok));
+            }
+        }
+    }
+
+    // Line-comment-only stripper. The 6 NPC files use "--" line comments exclusively (no
+    // "--[[ ]]" blocks); a future block comment naming a forbidden token would not be
+    // hidden — acceptable since the lint is best-effort and the sandbox is the stricter guard.
+    private static String stripLuaLineComments(String src) {
+        StringBuilder out = new StringBuilder(src.length());
+        for (String line : src.split("\n", -1)) {
+            int dash = line.indexOf("--");
+            out.append(dash >= 0 ? line.substring(0, dash) : line).append('\n');
+        }
+        return out.toString();
     }
 
     // ---------------- balance overrides reach runtime ----------------
@@ -299,6 +371,7 @@ public class RemixedFullPackTest {
         assertEquals("no items", 0, LuaItemRegistry.size());
         assertEquals("no spells", 0, LuaSpellRegistry.size());
         assertEquals("no mobs", 0, LuaMobRegistry.size());
+        assertEquals("no npcs", 0, LuaNpcRegistry.size());
         assertEquals("no shops", 0, LuaShopRegistry.size());
 
         assertEquals("lua_item_drop_prob stays default 0",
