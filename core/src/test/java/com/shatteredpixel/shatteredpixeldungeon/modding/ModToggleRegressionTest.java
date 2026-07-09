@@ -113,6 +113,7 @@ public class ModToggleRegressionTest {
 		assertTrue("M6b hydra mob loads", LuaMobRegistry.contains("hydra"));
 		assertTrue("M6b maze shadow mob loads", LuaMobRegistry.contains("maze_shadow"));
 		assertTrue("M6b buffer mob loads", LuaMobRegistry.contains("buffer"));
+		assertTrue("M17b remixed_fetid_rat loads", LuaMobRegistry.contains("remixed_fetid_rat"));
 		assertTrue(LuaAllyRegistry.contains("test_ally"));
 		assertTrue(LuaHeroRegistry.contains("test_hero"));
 		assertTrue(LuaSpellRegistry.contains("test_spell"));
@@ -145,7 +146,7 @@ public class ModToggleRegressionTest {
 
 		// Exact sizes: catches a missing/misnamed script that ID-checks alone could miss.
 		assertEquals("10 item dir scripts + 15 M10a item dir scripts + 1 entry item", 26, LuaItemRegistry.size());
-		assertEquals("test_mob + M6a PoC + 6 M6b PoC + 10 M10a mobs", 18, LuaMobRegistry.size());
+		assertEquals("test_mob + M6a PoC + 6 M6b PoC + 10 M10a mobs + 1 M17b mob", 19, LuaMobRegistry.size());
 		assertEquals(1, LuaAllyRegistry.size());
 		assertEquals(1, LuaHeroRegistry.size());
 		assertEquals("test_spell + 8 M6d + 22 M10a spells", 31, LuaSpellRegistry.size());
