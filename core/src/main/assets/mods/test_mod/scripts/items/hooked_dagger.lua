@@ -5,6 +5,7 @@ register_item {
     name = "钩刃匕首",
     desc = "M6d weapon 代表:命中给目标 Bleeding。attacker/defender 是 charId。",
     image = 0,
+    spriteFile = "sprites/items/item_HookedDagger.png",
     tier = 1,
 
     attackProc = function(attacker, defender, baseDamage)

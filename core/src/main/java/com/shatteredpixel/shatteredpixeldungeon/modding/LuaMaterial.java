@@ -34,6 +34,11 @@ public class LuaMaterial extends Item {
 	private ArrayList<String> actionList;
 	private boolean hasOnUse;
 
+	/** M16a: optional standalone sprite file path relative to the owning mod dir. */
+	private String spriteFile;
+	/** M16a: mod id that registered this material, used to resolve spriteFile. */
+	private String ownerModId;
+
 	private float energy = 0f;
 
 	private String burnTransformId;
@@ -65,6 +70,9 @@ public class LuaMaterial extends Item {
 		if (desc.isnil()) desc = tbl.get("info");
 		descStr = desc.optjstring("");
 		image = tbl.get("image").optint(0);
+		// M16a: optional standalone sprite file path.
+		spriteFile = tbl.get("spriteFile").optjstring(null);
+		ownerModId = tbl.get("__mod_id").optjstring(null);
 		priceValue = Math.max(0, tbl.get("price").optint(0));
 		stackable = tbl.get("stackable").optboolean(true);
 
@@ -113,6 +121,16 @@ public class LuaMaterial extends Item {
 
 	public float energy() {
 		return energy;
+	}
+
+	/** M16a: optional standalone sprite file path relative to the owning mod dir. */
+	public String spriteFile() {
+		return spriteFile;
+	}
+
+	/** M16a: id of the mod that registered this material, used to resolve spriteFile. */
+	public String ownerModId() {
+		return ownerModId;
 	}
 
 	@Override

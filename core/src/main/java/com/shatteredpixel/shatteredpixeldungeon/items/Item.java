@@ -74,6 +74,9 @@ public class Item implements Bundlable {
 	public boolean usesTargeting;
 
 	//TODO should these be private and accessed through methods?
+	/** M16a: default owner mod id for non-Lua items; LuaItem/LuaSpell/LuaMaterial override. */
+	public String ownerModId() { return null; }
+
 	public int image = 0;
 	public int icon = -1; //used as an identifier for items with randomized images
 	

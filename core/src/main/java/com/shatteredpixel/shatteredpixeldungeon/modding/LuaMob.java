@@ -8,6 +8,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.modding.annotations.LuaInterface;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.BatSprite;
+import com.shatteredpixel.shatteredpixeldungeon.sprites.ModMobSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.BruteSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.CrabSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.CharSprite;
@@ -83,6 +84,11 @@ public class LuaMob extends Mob {
 	private String nameStr = "???";
 	private int attackStat = 1;
 
+	/** M16a: optional standalone sprite file path relative to the owning mod dir. */
+	private String spriteFile;
+	/** M16a: mod id that registered this mob, used to resolve spriteFile. */
+	private String ownerModId;
+
 	/**
 	 * One-shot latch for the Lua {@code spawn} callback: fires on the first
 	 * {@link #act()} (so the mob has an id and is in the actor queue), then never
@@ -128,7 +134,18 @@ public class LuaMob extends Mob {
 		nameStr = tbl.get("name").checkjstring();
 		attackStat = Math.max(1, tbl.get("attack").checkint());
 		defenseSkill = tbl.get("defense").checkint();
-		spriteClass = resolveSprite(tbl.get("sprite").optjstring("crab"));
+		// M16a: optional standalone sprite file path. Bind ModMobSprite ONLY when
+		// the file actually resolves under its owning mod — otherwise the mod gets
+		// the whitelist sprite (degraded but never a blank render). resolves() is
+		// GL-free, so this is safe to evaluate at registry/hydrate time.
+		spriteFile = tbl.get("spriteFile").optjstring(null);
+		ownerModId = tbl.get("__mod_id").optjstring(null);
+		String fallbackSprite = tbl.get("sprite").optjstring("crab");
+		if (spriteFile != null && ModSpriteCache.resolves(ownerModId, spriteFile)) {
+			spriteClass = ModMobSprite.class;
+		} else {
+			spriteClass = resolveSprite(fallbackSprite);
+		}
 	}
 
 	/**
@@ -246,6 +263,16 @@ public class LuaMob extends Mob {
 	@LuaInterface
 	public String name() {
 		return nameStr;
+	}
+
+	/** M16a: optional standalone sprite file path relative to the owning mod dir. */
+	public String spriteFile() {
+		return spriteFile;
+	}
+
+	/** M16a: id of the mod that registered this mob, used to resolve spriteFile. */
+	public String ownerModId() {
+		return ownerModId;
 	}
 
 	@Override
