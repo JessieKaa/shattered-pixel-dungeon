@@ -24,6 +24,8 @@ package com.shatteredpixel.shatteredpixeldungeon.actors.mobs;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.items.trinkets.RatSkull;
+import com.shatteredpixel.shatteredpixeldungeon.modding.BalanceConfig;
+import com.shatteredpixel.shatteredpixeldungeon.modding.LuaMobFactory;
 import com.watabou.utils.Random;
 
 import java.util.ArrayList;
@@ -63,8 +65,18 @@ public class MobSpawner extends Actor {
 		ArrayList<Class<? extends Mob>> mobs = standardMobRotation( depth );
 		addRareMobs(depth, mobs);
 		swapMobAlts(mobs);
+		maybeInjectLuaMob(mobs);
 		Random.shuffle(mobs);
 		return mobs;
+	}
+
+	// If Lua mob spawning is enabled, probabilistically replace one vanilla slot
+	// with LuaMobFactory. Keeps rotation length identical so mob density is unchanged.
+	private static void maybeInjectLuaMob(ArrayList<Class<? extends Mob>> rotation) {
+		float prob = BalanceConfig.LUA_MOB_SPAWN_PROB;
+		if (prob <= 0f || rotation.isEmpty()) return;
+		if (Random.Float() >= prob) return;
+		rotation.set(Random.Int(rotation.size()), LuaMobFactory.class);
 	}
 
 	//returns a rotation of standard mobs, unshuffled.

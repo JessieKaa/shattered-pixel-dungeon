@@ -50,6 +50,16 @@ public final class LuaMobRegistry {
 		return mobs.containsKey(id);
 	}
 
+	/** Uniformly random registered id, or {@code null} when empty. */
+	public static String randomId() {
+		if (mobs.isEmpty()) return null;
+		int idx = com.watabou.utils.Random.Int(mobs.size());
+		for (String id : mobs.keySet()) {
+			if (idx-- == 0) return id;
+		}
+		return null; // unreachable
+	}
+
 	/** Number of registered mobs. Used by tests. */
 	public static int size() {
 		return mobs.size();

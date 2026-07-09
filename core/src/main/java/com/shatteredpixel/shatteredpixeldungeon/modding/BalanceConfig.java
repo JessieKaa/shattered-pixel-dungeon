@@ -40,6 +40,14 @@ public final class BalanceConfig {
     public static volatile float SHIELD_DECAY_PER_TURN = 0f;
 
     /**
+     * Probability that a vanilla spawn slot in {@link com.shatteredpixel.shatteredpixeldungeon.actors.mobs.MobSpawner}
+     * is replaced by a {@link LuaMobFactory} (and thus a random registered Lua mob). Declared in
+     * {@code mod.json} {@code balance.lua_mob_spawn_prob}. 0 = Lua mobs never replace vanilla slots
+     * (C3 regression baseline); 1 = every rotation has one Lua mob slot.
+     */
+    public static volatile float LUA_MOB_SPAWN_PROB = 0f;
+
+    /**
      * Apply a mod's {@code balance} overrides on top of the current values.
      * Keys are matched case-insensitively ({@link Locale#ROOT}, so Turkish-i
      * is not a problem) against the canonical names below; unknown keys are
@@ -85,6 +93,12 @@ public final class BalanceConfig {
                     else Gdx.app.error("BalanceConfig", "ignoring shield_decay_per_turn=" + v + " (must be finite, in [0,10000])");
                     break;
                 }
+                case "lua_mob_spawn_prob": {
+                    Double d = finiteInRange(v, 0, 1);
+                    if (d != null) LUA_MOB_SPAWN_PROB = d.floatValue();
+                    else Gdx.app.error("BalanceConfig", "ignoring lua_mob_spawn_prob=" + v + " (must be finite, in [0,1])");
+                    break;
+                }
                 default:
                     // unknown key — silently ignored for forward-compat
                     break;
@@ -114,5 +128,6 @@ public final class BalanceConfig {
         MANA_REGEN_DELAY = 8f;
         SHIELD_MAX = 1000;
         SHIELD_DECAY_PER_TURN = 0f;
+        LUA_MOB_SPAWN_PROB = 0f;
     }
 }
