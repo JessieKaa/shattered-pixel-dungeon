@@ -12,12 +12,16 @@ import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfMagicMappi
 import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.ScrollOfRemoveCurse;
 
 /**
- * Whitelist that maps a Lua-facing {@code item id} string to a fresh {@link Item}
- * instance. This is the M4c MVP answer to {@code PLAN §R2}: a small, hand-curated
- * catalogue of common consumables a SafeZone shop would plausibly sell. Anything
- * outside the catalogue is rejected (logged + skipped) rather than instantiated
- * via reflection — a Lua author cannot smuggle an arbitrary class name through
- * the shop pipeline, and an unknown id never crashes {@code interact}.
+ * Resolves a Lua-facing {@code item id} string to a fresh {@link Item} instance.
+ * Lookup order (M15d):
+ * <ol>
+ *   <li>{@link LuaItemRegistry} — any registered Lua item (weapon/material).</li>
+ *   <li>{@link LuaSpellRegistry} — any registered Lua spell.</li>
+ *   <li>The M4c vanilla consumables whitelist (potion_of_healing, small_ration, etc.).</li>
+ * </ol>
+ * Anything outside these catalogues is rejected (logged + skipped) rather than
+ * instantiated via reflection — a Lua author cannot smuggle an arbitrary class
+ * name through the shop pipeline, and an unknown id never crashes {@code interact}.
  *
  * <p>Each {@link #create(String)} call returns a brand-new {@link Item}; the
  * caller ({@link LuaShopNpc#attemptBuy}) hands it to {@code Item.doPickUp} so it
@@ -31,13 +35,21 @@ final class LuaShopItems {
 
     /**
      * @return a fresh {@link Item} for the id, or {@code null} (logged) if the id
-     *         is not in the whitelist. Returning null lets the caller degrade
+     *         is not known to any catalogue. Returning null lets the caller degrade
      *         gracefully (skip the entry / refuse the buy) instead of crashing.
      */
     static Item create(String id) {
         if (id == null) {
             return null;
         }
+
+        if (LuaItemRegistry.contains(id)) {
+            return LuaItemRegistry.createItem(id);
+        }
+        if (LuaSpellRegistry.contains(id)) {
+            return LuaSpellRegistry.create(id);
+        }
+
         switch (id) {
             case "potion_of_healing":     return new PotionOfHealing();
             case "potion_of_strength":    return new PotionOfStrength();

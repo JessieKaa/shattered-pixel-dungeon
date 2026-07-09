@@ -469,7 +469,111 @@ public class LuaShopTest {
 		assertTrue("luajava global itself must remain stripped", g.get("luajava").isnil());
 	}
 
+	// ---- LuaShopItems registry lookup (M15d) ----
+
+	@Test
+	public void createReturnsLuaItemInstance() {
+		LuaItemRegistry.clear();
+		LuaItemRegistry.register("m15d_test_blade", luaItemTable("m15d_test_blade", "weapon"));
+
+		Item item = LuaShopItems.create("m15d_test_blade");
+		assertNotNull("registered Lua item id → instance", item);
+		assertTrue("Lua item is LuaItem", item instanceof LuaItem);
+		assertEquals("m15d_test_blade", item.title());
+	}
+
+	@Test
+	public void createReturnsLuaMaterialInstance() {
+		LuaItemRegistry.clear();
+		LuaItemRegistry.register("m15d_test_ore", luaItemTable("m15d_test_ore", "material"));
+
+		Item item = LuaShopItems.create("m15d_test_ore");
+		assertNotNull("registered Lua material id → instance", item);
+		assertTrue("Lua material is LuaMaterial", item instanceof LuaMaterial);
+		assertEquals("m15d_test_ore", item.title());
+	}
+
+	@Test
+	public void createReturnsLuaSpellInstance() {
+		LuaSpellRegistry.clear();
+		LuaSpellRegistry.register("m15d_test_spell", luaSpellTable("m15d_test_spell"));
+
+		Item item = LuaShopItems.create("m15d_test_spell");
+		assertNotNull("registered Lua spell id → instance", item);
+		assertTrue("Lua spell is LuaSpell", item instanceof LuaSpell);
+		assertEquals("m15d_test_spell", item.title());
+	}
+
+	@Test
+	public void createPrefersLuaRegistryOverVanillaIdCollision() {
+		// A Lua author may register an id that happens to collide with a vanilla
+		// consumable id (e.g. "berry"). The Lua registry should win.
+		LuaItemRegistry.clear();
+		LuaItemRegistry.register("berry", luaItemTable("berry", "weapon"));
+
+		Item item = LuaShopItems.create("berry");
+		assertNotNull(item);
+		assertTrue("Lua registry takes precedence over vanilla whitelist",
+				item instanceof LuaItem);
+		assertEquals("berry", item.title());
+	}
+
+	@Test
+	public void attemptBuyWorksForLuaItemAndLuaSpell() {
+		LuaItemRegistry.clear();
+		LuaSpellRegistry.clear();
+		LuaItemRegistry.register("m15d_buy_blade", luaItemTable("m15d_buy_blade", "weapon"));
+		LuaSpellRegistry.register("m15d_buy_spell", luaSpellTable("m15d_buy_spell"));
+
+		LuaTable tbl = new LuaTable();
+		tbl.set("id", LuaValue.valueOf("m15d_buy_shop"));
+		tbl.set("name", LuaValue.valueOf("M15d Shop"));
+		LuaTable items = new LuaTable();
+		LuaTable i1 = new LuaTable();
+		i1.set("id", LuaValue.valueOf("m15d_buy_blade"));
+		i1.set("price", LuaValue.valueOf(30));
+		i1.set("quantity", LuaValue.valueOf(1));
+		items.set(1, i1);
+		LuaTable i2 = new LuaTable();
+		i2.set("id", LuaValue.valueOf("m15d_buy_spell"));
+		i2.set("price", LuaValue.valueOf(20));
+		items.set(2, i2);
+		tbl.set("items", items);
+		LuaShopRegistry.register("m15d_buy_shop", tbl);
+
+		LuaShopNpc shop = LuaShopRegistry.create("m15d_buy_shop");
+		Dungeon.gold = 100;
+
+		assertTrue("buy Lua item", shop.attemptBuy(0));
+		assertEquals("gold 100 - 30 = 70", 70, Dungeon.gold);
+		assertEquals("finite Lua item stock decremented", 0, shop.entry(0).quantity);
+
+		assertTrue("buy Lua spell", shop.attemptBuy(1));
+		assertEquals("gold 70 - 20 = 50", 50, Dungeon.gold);
+		assertEquals("infinite Lua spell stock stays -1", -1, shop.entry(1).quantity);
+	}
+
 	// ---- helpers ----
+
+	private static LuaTable luaItemTable(String id, String type) {
+		LuaTable tbl = new LuaTable();
+		tbl.set("id", LuaValue.valueOf(id));
+		tbl.set("name", LuaValue.valueOf(id));
+		tbl.set("desc", LuaValue.valueOf("test"));
+		tbl.set("tier", LuaValue.valueOf(1));
+		tbl.set("image", LuaValue.valueOf(0));
+		tbl.set("type", LuaValue.valueOf(type));
+		return tbl;
+	}
+
+	private static LuaTable luaSpellTable(String id) {
+		LuaTable tbl = new LuaTable();
+		tbl.set("id", LuaValue.valueOf(id));
+		tbl.set("name", LuaValue.valueOf(id));
+		tbl.set("desc", LuaValue.valueOf("test"));
+		tbl.set("image", LuaValue.valueOf(0));
+		return tbl;
+	}
 
 	private static LuaTable baseShopTable(String id) {
 		LuaTable tbl = new LuaTable();
