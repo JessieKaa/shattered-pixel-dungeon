@@ -1,0 +1,15 @@
+{
+  "id": "remixed_full",
+  "name": "Remixed Full (Alpha)",
+  "version": "0.1.0",
+  "spd_version": 896,
+  "author": "fork",
+  "default_enabled": false,
+  "entry": "entry.lua",
+  "description": "M16b 最小可玩 alpha 内容包:少量 remixed 风格 Lua item/spell/mob/shop/hub。默认关闭,开启后通过 balance 低概率进入主游戏掉落/刷怪池。",
+  "balance": {
+    "lua_item_drop_prob": 8,
+    "lua_spell_drop_prob": 6,
+    "lua_mob_spawn_prob": 0.05
+  }
+}
