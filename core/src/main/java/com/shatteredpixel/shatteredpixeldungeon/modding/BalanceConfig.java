@@ -40,6 +40,14 @@ public final class BalanceConfig {
     public static volatile float SHIELD_DECAY_PER_TURN = 0f;
 
     /**
+     * Runtime drop-probability for Lua-defined items in the standard Generator
+     * deck (M15a). Mods opt in via {@code balance: { lua_item_drop_prob: N }}.
+     * Default 0 keeps vanilla drop balance untouched; values are probabilities
+     * in the same unit as vanilla category firstProb/secondProb.
+     */
+    public static volatile float LUA_ITEM_DROP_PROB = 0f;
+
+    /**
      * Apply a mod's {@code balance} overrides on top of the current values.
      * Keys are matched case-insensitively ({@link Locale#ROOT}, so Turkish-i
      * is not a problem) against the canonical names below; unknown keys are
@@ -85,6 +93,12 @@ public final class BalanceConfig {
                     else Gdx.app.error("BalanceConfig", "ignoring shield_decay_per_turn=" + v + " (must be finite, in [0,10000])");
                     break;
                 }
+                case "lua_item_drop_prob": {
+                    Double d = finiteInRange(v, 0, 10000);
+                    if (d != null) LUA_ITEM_DROP_PROB = d.floatValue();
+                    else Gdx.app.error("BalanceConfig", "ignoring lua_item_drop_prob=" + v + " (must be finite, in [0,10000])");
+                    break;
+                }
                 default:
                     // unknown key — silently ignored for forward-compat
                     break;
@@ -114,5 +128,6 @@ public final class BalanceConfig {
         MANA_REGEN_DELAY = 8f;
         SHIELD_MAX = 1000;
         SHIELD_DECAY_PER_TURN = 0f;
+        LUA_ITEM_DROP_PROB = 0f;
     }
 }

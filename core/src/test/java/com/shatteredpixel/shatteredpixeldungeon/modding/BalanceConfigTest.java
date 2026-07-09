@@ -79,10 +79,12 @@ public class BalanceConfigTest {
         BalanceConfig.MANA_REGEN_DELAY = 3f;
         BalanceConfig.SHIELD_MAX = 500;
         BalanceConfig.SHIELD_DECAY_PER_TURN = 2f;
+        BalanceConfig.LUA_ITEM_DROP_PROB = 12f;
         BalanceConfig.resetToDefaults();
         assertEquals(8f, BalanceConfig.MANA_REGEN_DELAY, 0f);
         assertEquals(1000, BalanceConfig.SHIELD_MAX);
         assertEquals(0f, BalanceConfig.SHIELD_DECAY_PER_TURN, 0f);
+        assertEquals(0f, BalanceConfig.LUA_ITEM_DROP_PROB, 0f);
     }
 
     // ---- applyModOverrides ----
@@ -95,12 +97,14 @@ public class BalanceConfigTest {
         o.put("mana_base", 12);
         o.put("mana_per_level", 3);
         o.put("shield_decay_per_turn", 1.5);
+        o.put("lua_item_drop_prob", 7.5);
         BalanceConfig.applyModOverrides(o);
         assertEquals(5f, BalanceConfig.MANA_REGEN_DELAY, 0f);
         assertEquals(1500, BalanceConfig.SHIELD_MAX);
         assertEquals(12, BalanceConfig.MANA_BASE);
         assertEquals(3, BalanceConfig.MANA_PER_LEVEL);
         assertEquals(1.5f, BalanceConfig.SHIELD_DECAY_PER_TURN, 0f);
+        assertEquals(7.5f, BalanceConfig.LUA_ITEM_DROP_PROB, 0f);
     }
 
     @Test
@@ -138,11 +142,13 @@ public class BalanceConfigTest {
         o.put("shield_max", -5);             // rejected (must be > 0)
         o.put("mana_base", 0);               // rejected (must be > 0)
         o.put("shield_decay_per_turn", -1f); // rejected (must be >= 0)
+        o.put("lua_item_drop_prob", -2f);    // rejected (must be >= 0)
         BalanceConfig.applyModOverrides(o);
         assertEquals("regen delay untouched", 8f, BalanceConfig.MANA_REGEN_DELAY, 0f);
         assertEquals("shield max untouched", 1000, BalanceConfig.SHIELD_MAX);
         assertEquals("mana base untouched", 10, BalanceConfig.MANA_BASE);
         assertEquals("decay untouched", 0f, BalanceConfig.SHIELD_DECAY_PER_TURN, 0f);
+        assertEquals("lua_item_drop_prob untouched", 0f, BalanceConfig.LUA_ITEM_DROP_PROB, 0f);
     }
 
     @Test
@@ -172,11 +178,13 @@ public class BalanceConfigTest {
         o.put("mana_regen_delay", Double.NaN);
         o.put("shield_max", 1e18);
         o.put("shield_decay_per_turn", Double.NEGATIVE_INFINITY);
+        o.put("lua_item_drop_prob", Double.NaN);
         BalanceConfig.applyModOverrides(o);
         assertEquals(10, BalanceConfig.MANA_BASE);
         assertEquals(8f, BalanceConfig.MANA_REGEN_DELAY, 0f);
         assertEquals(1000, BalanceConfig.SHIELD_MAX);
         assertEquals(0f, BalanceConfig.SHIELD_DECAY_PER_TURN, 0f);
+        assertEquals(0f, BalanceConfig.LUA_ITEM_DROP_PROB, 0f);
     }
 
     // ---- ShieldTracker lazy decay (reconcile on read vs Actor.now clock) ----
@@ -315,12 +323,13 @@ public class BalanceConfigTest {
     @Test
     public void manifestParsesBalanceBlock() {
         String json = baseManifest().replace('\'', '"')
-                .replace("}", ", 'balance': {'mana_regen_delay': 5.0, 'shield_decay_per_turn': 1}}")
+                .replace("}", ", 'balance': {'mana_regen_delay': 5.0, 'shield_decay_per_turn': 1, 'lua_item_drop_prob': 12.5}}")
                 .replace('\'', '"');
         ModManifest m = parse(json);
-        assertEquals(2, m.balance.size());
+        assertEquals(3, m.balance.size());
         assertEquals(5.0, m.balance.get("mana_regen_delay"), 0f);
         assertEquals(1.0, m.balance.get("shield_decay_per_turn"), 0f);
+        assertEquals(12.5, m.balance.get("lua_item_drop_prob"), 0f);
     }
 
     @Test

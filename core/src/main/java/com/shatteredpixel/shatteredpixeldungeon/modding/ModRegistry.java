@@ -1,6 +1,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.modding;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.shatteredpixel.shatteredpixeldungeon.items.Generator;
 import com.watabou.utils.GameSettings;
 
 import java.util.Collections;
@@ -89,11 +90,25 @@ public final class ModRegistry {
 	 */
 	private static void applyEnabledBalanceOverrides() {
 		BalanceConfig.resetToDefaults();
+		// Fork (M15a): lua_item_drop_prob aggregates by max across enabled mods,
+		// not last-wins like the rest of BalanceConfig. This keeps drop probability
+		// from collapsing to the last scanned mod's value and prevents unbounded
+		// stacking if multiple mods opt in.
+		float luaDropProbMax = 0f;
 		for (ModManifest m : scanned) {
 			if (isEnabled(m.id)) {
 				BalanceConfig.applyModOverrides(m.balance);
+				if (m.balance != null && m.balance.containsKey("lua_item_drop_prob")) {
+					double v = m.balance.get("lua_item_drop_prob");
+					if (Double.isFinite(v) && v >= 0 && v <= 10000) {
+						luaDropProbMax = Math.max(luaDropProbMax, (float) v);
+					}
+				}
 			}
 		}
+		// Override BalanceConfig with the aggregated max so callers see the same value.
+		BalanceConfig.LUA_ITEM_DROP_PROB = luaDropProbMax;
+		Generator.setLuaItemProbability(luaDropProbMax, luaDropProbMax);
 	}
 
 	private static ModManifest lookup(String id) {

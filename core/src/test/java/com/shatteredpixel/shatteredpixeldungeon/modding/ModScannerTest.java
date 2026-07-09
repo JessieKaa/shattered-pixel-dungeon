@@ -346,6 +346,42 @@ public class ModScannerTest {
 		assertTrue(first.contains("test_mod"));
 	}
 
+	@Test
+	public void registry_luaItemDropProb_aggregatesByMaxAcrossEnabledMods() throws Exception {
+		File modsDir = newModsDir();
+		buildMod(modsDir, "low_drop_mod",
+			manifest("low_drop_mod", TEST_VERSION_CODE, false)
+					.replace("}", ", 'balance': {'lua_item_drop_prob': 1}}"));
+		buildMod(modsDir, "high_drop_mod",
+			manifest("high_drop_mod", TEST_VERSION_CODE, false)
+					.replace("}", ", 'balance': {'lua_item_drop_prob': 100}}"));
+
+		ModRegistry.scanDir(new FileHandle(modsDir));
+		ModRegistry.setEnabled("low_drop_mod", true);
+		ModRegistry.setEnabled("high_drop_mod", true);
+
+		assertEquals("lua_item_drop_prob must aggregate by max across enabled mods",
+				100f, BalanceConfig.LUA_ITEM_DROP_PROB, 0f);
+	}
+
+	@Test
+	public void registry_luaItemDropProb_maxIsIndependentOfScanOrder() throws Exception {
+		File modsDir = newModsDir();
+		buildMod(modsDir, "first_mod",
+			manifest("first_mod", TEST_VERSION_CODE, false)
+					.replace("}", ", 'balance': {'lua_item_drop_prob': 50}}"));
+		buildMod(modsDir, "second_mod",
+			manifest("second_mod", TEST_VERSION_CODE, false)
+					.replace("}", ", 'balance': {'lua_item_drop_prob': 20}}"));
+
+		ModRegistry.scanDir(new FileHandle(modsDir));
+		ModRegistry.setEnabled("first_mod", true);
+		ModRegistry.setEnabled("second_mod", true);
+
+		assertEquals("scan order must not collapse lua_item_drop_prob to last-wins",
+				50f, BalanceConfig.LUA_ITEM_DROP_PROB, 0f);
+	}
+
 	// ---------------- helpers ----------------
 
 	private File newModsDir() throws IOException {
