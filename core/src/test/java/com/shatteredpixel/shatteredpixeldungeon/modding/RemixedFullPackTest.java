@@ -11,6 +11,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.MobSpawner;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Bleeding;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Poison;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Haste;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
@@ -118,7 +119,7 @@ public class RemixedFullPackTest {
 
         LuaEngine.init();
 
-        // 10 items: 5 weapons + 5 materials.
+        // 14 items: 5 weapons + 9 materials (5 original materials + 4 M19e ports).
         assertTrue("hooked_dagger registered",
                 LuaItemRegistry.contains("remixed_full_hooked_dagger"));
         assertTrue("battle_axe registered",
@@ -139,6 +140,15 @@ public class RemixedFullPackTest {
                 LuaItemRegistry.contains("remixed_full_toxic_gland"));
         assertTrue("rusty_coin registered",
                 LuaItemRegistry.contains("remixed_full_rusty_coin"));
+        // M19e: 4 ported remixed items (2 pure materials + 2 eatable food).
+        assertTrue("bone_shard registered",
+                LuaItemRegistry.contains("remixed_full_bone_shard"));
+        assertTrue("vile_essence registered",
+                LuaItemRegistry.contains("remixed_full_vile_essence"));
+        assertTrue("rotten_fish registered",
+                LuaItemRegistry.contains("remixed_full_rotten_fish"));
+        assertTrue("fried_fish registered",
+                LuaItemRegistry.contains("remixed_full_fried_fish"));
 
         // 5 spells.
         assertTrue("magic_arrow registered",
@@ -192,7 +202,7 @@ public class RemixedFullPackTest {
         assertTrue("inquirer NPC registered",
                 LuaNpcRegistry.contains("remixed_full_inquirer"));
 
-        assertEquals("10 items", 10, LuaItemRegistry.size());
+        assertEquals("14 items", 14, LuaItemRegistry.size());
         assertEquals("5 spells", 5, LuaSpellRegistry.size());
         assertEquals("6 mobs", 6, LuaMobRegistry.size());
         assertEquals("6 town NPCs", 6, LuaNpcRegistry.size());
@@ -810,6 +820,140 @@ public class RemixedFullPackTest {
             Actor.remove(self);
             Actor.remove(enemy);
             unbindDungeon();
+        }
+    }
+
+    // ---------------- M19e: ported remixed items register + declare expected fields ----------------
+
+    /**
+     * M19e the 4 ported remixed items (bone_shard, vile_essence, rotten_fish, fried_fish) register
+     * as materials and declare the exact fields the port promised. Pins content-port correctness at
+     * the registry-table level so a dropped defaultAction/energy/poisonTransform or a wrong spriteFile
+     * path is caught even if the item still registers — content-port bugs that a presence-only
+     * {@link #enabled_loadsFullAlphaManifest} assertion would miss.
+     */
+    @Test
+    public void m19e_items_declareExpectedFields() throws Exception {
+        enableRemixedFull();
+        LuaEngine.init();
+
+        String[] newIds = {
+                "remixed_full_bone_shard",
+                "remixed_full_vile_essence",
+                "remixed_full_rotten_fish",
+                "remixed_full_fried_fish",
+        };
+        for (String id : newIds) {
+            assertTrue(id + " registered", LuaItemRegistry.contains(id));
+        }
+
+        // bone_shard: pure material, no action.
+        LuaTable boneShard = LuaItemRegistry.getTable("remixed_full_bone_shard");
+        assertNotNull(boneShard);
+        assertEquals("bone_shard type", "material", boneShard.get("type").tojstring());
+        assertTrue("bone_shard stackable", boneShard.get("stackable").toboolean());
+        assertEquals("bone_shard spriteFile is relative to mod root",
+                "sprites/items/item_BoneShard.png", boneShard.get("spriteFile").tojstring());
+        assertTrue("bone_shard price > 0", boneShard.get("price").toint() > 0);
+        assertTrue("bone_shard has no defaultAction (pure material)",
+                boneShard.get("defaultAction").isnil());
+
+        // vile_essence: pure material, glowing intentionally dropped (fork LuaMaterial has no glowing).
+        LuaTable vileEssence = LuaItemRegistry.getTable("remixed_full_vile_essence");
+        assertNotNull(vileEssence);
+        assertEquals("vile_essence type", "material", vileEssence.get("type").tojstring());
+        assertEquals("vile_essence spriteFile",
+                "sprites/items/item_VileEssence.png", vileEssence.get("spriteFile").tojstring());
+        assertTrue("vile_essence has no defaultAction", vileEssence.get("defaultAction").isnil());
+        assertFalse("vile_essence glowing dropped (fork unsupported)",
+                vileEssence.get("glowing").isfunction());
+
+        // rotten_fish: eatable, onEat applies Poison, partial satiation (HUNGRY 300 / 4).
+        LuaTable rottenFish = LuaItemRegistry.getTable("remixed_full_rotten_fish");
+        assertNotNull(rottenFish);
+        assertEquals("rotten_fish defaultAction", "EAT", rottenFish.get("defaultAction").tojstring());
+        assertEquals("rotten_fish energy", 75, rottenFish.get("energy").toint());
+        assertTrue("rotten_fish onEat is a function", rottenFish.get("onEat").isfunction());
+
+        // fried_fish: eatable, fully satiating (STARVING 450), poison-transforms into rotten_fish.
+        LuaTable friedFish = LuaItemRegistry.getTable("remixed_full_fried_fish");
+        assertNotNull(friedFish);
+        assertEquals("fried_fish defaultAction", "EAT", friedFish.get("defaultAction").tojstring());
+        assertEquals("fried_fish energy", 450, friedFish.get("energy").toint());
+        assertEquals("fried_fish poisonTransform target",
+                "remixed_full_rotten_fish", friedFish.get("poisonTransform").tojstring());
+    }
+
+    /**
+     * M19e forbidden-token lint: the 4 ported item scripts must not reference any remished-only API
+     * the fork does not expose (luajava / require / itemLib / makeGlowing / hero:eat / MobFactory /
+     * equipable slots / Sfx / Badges …). Pins the Acceptance clause "只用 fork 支持的 register_item
+     * 声明式字段 + RPD.affectBuff,不依赖 fork 缺失 API" at the source-text level — a regression where
+     * a future edit reintroduces a remished-only call is caught here even if the item still registers.
+     * Mirrors {@link #townNpcs_useOnlyForkSupportedApis}.
+     *
+     * <p>Fork-supported {@code RPD.spawnMob} / {@code permanentBuff} / {@code terrain} / {@code dig}
+     * are NOT forbidden — they exist in the fork; the declarative material scripts simply don't use them.
+     */
+    @Test
+    public void m19e_items_useOnlyForkSupportedApis() {
+        String[] itemScripts = {
+                "mods/remixed_full/scripts/items/remixed_full_bone_shard.lua",
+                "mods/remixed_full/scripts/items/remixed_full_vile_essence.lua",
+                "mods/remixed_full/scripts/items/remixed_full_rotten_fish.lua",
+                "mods/remixed_full/scripts/items/remixed_full_fried_fish.lua",
+        };
+        // Fork LuaMaterial routes: declarative fields + onEat/onUse/onThrow callbacks + RPD.affectBuff.
+        // It does NOT route: luajava, require, itemLib/item.init, makeGlowing/makeShield, hero:eat/:lvl,
+        // MobFactory/ItemFactory, RPD.Slots/equipable, getHeroClass/WndChooseWay, animatedDrop/collectAnimated,
+        // playSound/.Sfx, RPD.Badges/RPD.Buffs.
+        String[] forbidden = {
+                "luajava", "require ", "itemLib", "item.init", "item:init",
+                "makeGlowing", "makeShield",
+                ":eat(", ":lvl(",
+                "MobFactory", "ItemFactory",
+                "RPD.Slots", "equipable",
+                "getHeroClass", "WndChooseWay",
+                "animatedDrop", "collectAnimated",
+                "playSound", ".Sfx",
+                "RPD.Badges", "RPD.Buffs",
+        };
+        for (String path : itemScripts) {
+            String code = stripLuaLineComments(Gdx.files.internal(path).readString("UTF-8"));
+            for (String tok : forbidden) {
+                assertFalse(
+                        "M19e item " + path + " must not reference remished-only API '" + tok
+                                + "' (Acceptance: declarative register_item + RPD.affectBuff only)",
+                        code.contains(tok));
+            }
+        }
+    }
+
+    /**
+     * M19e the rotten_fish onEat callback actually applies Poison — proving the degraded port still
+     * delivers its core "eat a rotten fish → get poisoned" effect. Analogous to
+     * {@link #enabled_weaponAttackProcFiresAndAppliesBuff}, which exercises a weapon attackProc the
+     * same way (callOptInt on the registry table, then assert the buff landed).
+     */
+    @Test
+    public void m19e_rottenFish_onEatAppliesPoison() throws Exception {
+        enableRemixedFull();
+        LuaEngine.init();
+
+        LuaTable rottenFish = LuaItemRegistry.getTable("remixed_full_rotten_fish");
+        assertNotNull(rottenFish);
+
+        Hero hero = newHero();
+        try {
+            assertNull("hero starts without Poison", hero.buff(Poison.class));
+            // LuaMaterial.execute(AC_EAT) calls onEat with (heroId, itemId); mirror that here.
+            LuaItemCallbacks.callOpt(rottenFish, "onEat",
+                    LuaItemCallbacks.arg(hero.id()),
+                    LuaValue.valueOf("remixed_full_rotten_fish"));
+            assertNotNull("rotten_fish onEat must apply Poison via RPD.affectBuff",
+                    hero.buff(Poison.class));
+        } finally {
+            Actor.remove(hero);
         }
     }
 
