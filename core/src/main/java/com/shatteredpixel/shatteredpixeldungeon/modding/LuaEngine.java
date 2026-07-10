@@ -77,6 +77,11 @@ public class LuaEngine implements ResourceFinder {
 		return instance;
 	}
 
+	/** Test/inspection hook: returns the Lua globals used by this engine. */
+	public Globals getGlobals() {
+		return globals;
+	}
+
 	/** Bootstrap the engine and run {@code scripts/init.lua}. Safe to call once on game create(). */
 	public static synchronized void init() {
 		instance().initInternal();
