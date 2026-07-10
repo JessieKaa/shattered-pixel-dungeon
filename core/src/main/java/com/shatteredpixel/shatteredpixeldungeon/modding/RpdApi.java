@@ -67,9 +67,11 @@ import com.watabou.utils.PathFinder;
 import com.watabou.utils.Random;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
+import org.luaj.vm2.Varargs;
 import org.luaj.vm2.lib.OneArgFunction;
 import org.luaj.vm2.lib.ThreeArgFunction;
 import org.luaj.vm2.lib.TwoArgFunction;
+import org.luaj.vm2.lib.VarArgFunction;
 import org.luaj.vm2.lib.ZeroArgFunction;
 
 /**
@@ -165,6 +167,11 @@ final class RpdApi {
         // fires from the actor thread). Both take an int charId and validate it.
         rpd.set("npcYell", new NpcYell());
         rpd.set("showDialog", new ShowDialog());
+        // M18a: NPC option dialog. chooseOption opens a WndOptions on the render
+        // thread (same seam as showDialog / LuaShopNpc.showShopWindow) and calls
+        // the Lua callback with a 1-based choice index — option-driven NPC
+        // interaction (remished chooseOption equivalent). callback(choiceIdx).
+        rpd.set("chooseOption", new ChooseOption());
         // M4d: town-portal bridge. enterTown/leaveTown delegate to LuaLevelService
         // on the render thread (onInteract fires on the actor thread; switchScene
         // must run on render). Both are debug-gated inside LuaLevelService.
@@ -958,6 +965,109 @@ final class RpdApi {
                 Gdx.app.error(TAG, "showDialog threw", e);
             }
             return NIL;
+        }
+    }
+
+    /**
+     * {@code RPD.chooseOption(charId, title, options, callback)} — open a
+     * {@link com.shatteredpixel.shatteredpixeldungeon.windows.WndOptions} on the
+     * render thread and invoke {@code callback} with the 1-based index of the
+     * player's choice (remished {@code chooseOption} equivalent). The
+     * {@code charId} is validated as a live Char (anchor only — same rationale as
+     * {@link ShowDialog}); {@code options} is a Lua array table of strings.
+     *
+     * <p>Callback-style by design: {@code onInteract} fires on the actor thread
+     * and the Wnd must be created on the render thread, so a synchronous Lua
+     * return would have to block the actor thread on the render thread (a
+     * deadlock-prone cross-thread handoff). The callback fires later on the
+     * render thread via {@link com.shatteredpixel.shatteredpixeldungeon.windows.WndOptions#onSelect},
+     * so Lua callbacks must not assume the actor thread.
+     *
+     * <p>The 0-based→1-based index mapping and the Lua-table→String[] parse live
+     * in the package-private seams {@link #parseOptionsTable} and
+     * {@link #dispatchChoice}, which are exercised headlessly (the live Wnd
+     * render is verified by the desktop run, same split as {@link ShowDialog}).
+     * Returns NIL on every path (async; bad args are logged, never thrown).
+     */
+    private static final class ChooseOption extends VarArgFunction {
+        @Override public Varargs invoke(Varargs args) {
+            try {
+                Char c = resolveChar(args.arg(1));
+                if (c == null) return NIL;
+                LuaValue titleVal = args.arg(2);
+                if (!titleVal.isstring()) {
+                    Gdx.app.error(TAG, "chooseOption expected string title, got " + titleVal.typename());
+                    return NIL;
+                }
+                String[] options = parseOptionsTable(args.arg(3));
+                if (options == null) {
+                    Gdx.app.error(TAG, "chooseOption options must be a non-empty array of strings");
+                    return NIL;
+                }
+                final LuaValue callback = args.arg(4);
+                if (!callback.isfunction()) {
+                    Gdx.app.error(TAG, "chooseOption expected function callback, got " + callback.typename());
+                    return NIL;
+                }
+                final String title = titleVal.optjstring("");
+                final String[] opts = options;
+                Game.runOnRenderThread(() -> GameScene.show(
+                        new com.shatteredpixel.shatteredpixeldungeon.windows.WndOptions(title, "", opts) {
+                            @Override protected void onSelect(int index) {
+                                // WndOptions fires onSelect only for a real button
+                                // pick (back/cancel hides the window without calling
+                                // it); index is 0-based, mapped to 1-based for Lua.
+                                dispatchChoice(callback, index);
+                            }
+                        }));
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "chooseOption threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * Parse a Lua array table of strings into a {@code String[]} (1-indexed in
+     * Lua, 0-indexed in Java, order preserved — matches {@code LuaShopNpc.hydrate}
+     * traversal). Returns {@code null} when {@code optsVal} is not a table, is
+     * empty, or contains any non-string element, so {@link ChooseOption#invoke}
+     * can uniformly reject with a single log line. Pure logic, headless-testable.
+     */
+    static String[] parseOptionsTable(LuaValue optsVal) {
+        if (optsVal == null || !optsVal.istable()) return null;
+        LuaTable t = optsVal.checktable();
+        int n = t.len().toint();
+        if (n <= 0) return null;
+        String[] out = new String[n];
+        for (int i = 1; i <= n; i++) {
+            LuaValue v = t.get(i);
+            // luaj's isstring() is true for numbers too (Lua number→string
+            // coercion); require the exact string type so {1,'b'} is rejected
+            // (a numeric button label is almost certainly a script bug).
+            if (v.type() != LuaValue.TSTRING) return null;
+            out[i - 1] = v.optjstring("");
+        }
+        return out;
+    }
+
+    /**
+     * Invoke the chooseOption Lua {@code callback} with a 1-based index derived
+     * from the Wnd's 0-based {@code selectedIndex}. Returns false (no-op) when
+     * {@code selectedIndex < 0} (defensive guard for package-private seam; current
+     * WndOptions always passes a real index) or the callback is missing/not a
+     * function; swallows any Lua error via {@code Gdx.app.error} so a misbehaving
+     * callback cannot crash the render thread. Pure logic, headless-testable.
+     */
+    static boolean dispatchChoice(LuaValue callback, int selectedIndex) {
+        if (selectedIndex < 0) return false;
+        if (callback == null || !callback.isfunction()) return false;
+        try {
+            callback.call(LuaValue.valueOf(selectedIndex + 1));
+            return true;
+        } catch (Exception e) {
+            Gdx.app.error(TAG, "chooseOption callback threw", e);
+            return false;
         }
     }
 
