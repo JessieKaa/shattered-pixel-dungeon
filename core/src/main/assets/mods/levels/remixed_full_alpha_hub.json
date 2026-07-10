@@ -173,11 +173,13 @@
       "quantity": 100
     },
     {
-      "type": "remixed_full_dark_gold",
+      "_comment": "M19d: upgraded latent spec to lua_item: prefix so DataDrivenLevel actually spawns it (ITEM_TYPES whitelist only has gold).",
+      "type": "lua_item:remixed_full_dark_gold",
       "pos": 63
     },
     {
-      "type": "remixed_full_remixed_ration",
+      "_comment": "M19d: upgraded latent spec to lua_item: prefix so DataDrivenLevel actually spawns it.",
+      "type": "lua_item:remixed_full_remixed_ration",
       "pos": 74
     }
   ]

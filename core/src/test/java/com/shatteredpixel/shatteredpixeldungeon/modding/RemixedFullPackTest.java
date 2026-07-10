@@ -15,6 +15,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Haste;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
 import com.shatteredpixel.shatteredpixeldungeon.items.Generator;
+import com.shatteredpixel.shatteredpixeldungeon.items.Heap;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
@@ -28,6 +29,11 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -446,6 +452,135 @@ public class RemixedFullPackTest {
         assertTrue("chapel bishop NPC exists",    LuaNpcRegistry.contains("remixed_full_bishop"));
         assertTrue("chapel inquirer NPC exists",  LuaNpcRegistry.contains("remixed_full_inquirer"));
         assertTrue("chapel black_cat NPC exists", LuaNpcRegistry.contains("remixed_full_black_cat"));
+    }
+
+    /**
+     * M19d every {@code lua_mob:}/{@code lua_item:} spec placed in the three remixed_full
+     * showcase levels (tavern, chapel, alpha hub) actually spawns once the level is built and
+     * {@code create()}-ed with remixed_full enabled. This is the acceptance test for the M19d
+     * content upgrade: it proves the JSON specs are neither latent (an unprefixed id like
+     * {@code remixed_full_dark_gold} is silently skipped because {@code DataDrivenLevel}'s
+     * {@code ITEM_TYPES} whitelist only knows {@code gold}) nor mis-positioned (a {@code lua_mob}
+     * on a solid cell is skipped by {@code createMobs}, and a {@code lua_item} on a solid cell
+     * would drop out of reach). For each level we drive the real {@code create()} path — the
+     * same one the engine runs at runtime — and assert:
+     *
+     * <ul>
+     *   <li>each {@code lua_mob:} spec yields a {@link LuaMob} parked at its declared pos;</li>
+     *   <li>each {@code lua_item:} spec yields a heap at its declared pos whose top item is a
+     *       Lua item or material (materials dispatch to {@link LuaMaterial});</li>
+     *   <li>no two lua spec positions collide and none sits on the entrance/exit cell;</li>
+     *   <li>each {@code lua_mob} cell is passable and non-solid against the authoritative
+     *       {@link Terrain#flags}.</li>
+     * </ul>
+     *
+     * <p>Complements {@link #m17c_levels_areStructurallyValidAndPositionsPassable}: that test
+     * only calls {@code build()} (no spawn) and covers tavern/chapel; this one calls
+     * {@code create()} (real spawn path) and adds the hub, whose two item specs were the latent
+     * ones upgraded to the {@code lua_item:} prefix by M19d.
+     */
+    @Test
+    public void m19d_luaMobAndLuaItem_spawnAcrossRemixedFullLevels() throws Exception {
+        enableRemixedFull();
+        LuaEngine.init();
+
+        String[][] levels = {
+                {"mods/levels/remixed_full_tavern.json", "remixed_full_tavern"},
+                {"mods/levels/remixed_full_chapel.json", "remixed_full_chapel"},
+                {"mods/levels/remixed_full_alpha_hub.json", "remixed_full_alpha_hub"},
+        };
+        for (String[] meta : levels) {
+            String asset = meta[0];
+            String id = meta[1];
+
+            JsonValue root = new JsonReader().parse(Gdx.files.internal(asset).readString("UTF-8"));
+            int entrance = root.getInt("entrance");
+            int exit = root.getInt("exit");
+
+            List<String> luaMobIds = new ArrayList<>();
+            List<Integer> luaMobPos = new ArrayList<>();
+            List<String> luaItemIds = new ArrayList<>();
+            List<Integer> luaItemPos = new ArrayList<>();
+            for (JsonValue m = root.require("mobs").child; m != null; m = m.next) {
+                String t = m.getString("type");
+                if (t.startsWith("lua_mob:")) {
+                    luaMobIds.add(t.substring("lua_mob:".length()));
+                    luaMobPos.add(m.getInt("pos"));
+                }
+            }
+            if (root.get("items") != null) {
+                for (JsonValue it = root.get("items").child; it != null; it = it.next) {
+                    String t = it.getString("type");
+                    if (t.startsWith("lua_item:")) {
+                        luaItemIds.add(t.substring("lua_item:".length()));
+                        luaItemPos.add(it.getInt("pos"));
+                    }
+                }
+            }
+            assertFalse(id + " should place at least one lua_mob", luaMobIds.isEmpty());
+            assertFalse(id + " should place at least one lua_item", luaItemIds.isEmpty());
+
+            // No two lua spec positions collide; none overlaps entrance/exit.
+            Set<Integer> seen = new HashSet<>();
+            assertTrue(id + " entrance/exit must differ", entrance != exit);
+            seen.add(entrance);
+            seen.add(exit);
+            for (int i = 0; i < luaMobPos.size(); i++) {
+                int pos = luaMobPos.get(i);
+                assertTrue(id + " lua_mob " + luaMobIds.get(i) + " @" + pos
+                        + " must not collide with another spec or entrance/exit", seen.add(pos));
+            }
+            for (int i = 0; i < luaItemPos.size(); i++) {
+                int pos = luaItemPos.get(i);
+                assertTrue(id + " lua_item " + luaItemIds.get(i) + " @" + pos
+                        + " must not collide with another spec or entrance/exit", seen.add(pos));
+            }
+
+            DataDrivenLevel lvl = DataDrivenLevel.fromAsset(asset, id);
+            // create() routes lua_item drops through Level.drop(), whose pressCell guard
+            // evaluates ShatteredPixelDungeon.scene() (-> Game.instance.scene) only when
+            // Dungeon.level != null. A prior test in the suite may leave Dungeon.level bound,
+            // which would NPE under the headless app — so neutralise it for the create() call
+            // exactly like bindMinimalDungeon/unbindDungeon do for the callback tests.
+            Level savedLvl = Dungeon.level;
+            Dungeon.level = null;
+            try {
+                lvl.create();
+            } finally {
+                Dungeon.level = savedLvl;
+            }
+            assertNotNull(id + " map allocated after create()", lvl.map);
+
+            for (int i = 0; i < luaMobIds.size(); i++) {
+                String mobId = luaMobIds.get(i);
+                int pos = luaMobPos.get(i);
+                boolean found = false;
+                for (Mob m : lvl.mobs) {
+                    if (m instanceof LuaMob && m.pos == pos) {
+                        found = true;
+                        break;
+                    }
+                }
+                assertTrue(id + " lua_mob " + mobId + " @" + pos + " must spawn as a LuaMob", found);
+                int flags = Terrain.flags[lvl.map[pos]];
+                assertTrue(id + " lua_mob " + mobId + " @" + pos + " cell must be passable",
+                        (flags & Terrain.PASSABLE) != 0);
+                assertFalse(id + " lua_mob " + mobId + " @" + pos + " cell must not be solid",
+                        (flags & Terrain.SOLID) != 0);
+            }
+
+            for (int i = 0; i < luaItemIds.size(); i++) {
+                String itemId = luaItemIds.get(i);
+                int pos = luaItemPos.get(i);
+                Heap heap = lvl.heaps.get(pos);
+                assertNotNull(id + " lua_item " + itemId + " @" + pos + " must drop a heap", heap);
+                Item top = heap.peek();
+                assertTrue(id + " lua_item " + itemId + " @" + pos
+                                + " heap top must be a Lua item/material (got "
+                                + (top == null ? "null" : top.getClass().getSimpleName()) + ")",
+                        top instanceof LuaItem || top instanceof LuaMaterial);
+            }
+        }
     }
 
     // ---------------- disabled: registries empty + no vanilla pollution ----------------

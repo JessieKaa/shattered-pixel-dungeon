@@ -276,6 +276,11 @@
     {
       "type": "lua_npc:remixed_full_black_cat",
       "pos": 180
+    },
+    {
+      "_comment": "M19d content upgrade: chapel-themed hostile Lua mob in an isolated corner.",
+      "type": "lua_mob:remixed_full_cold_spirit",
+      "pos": 161
     }
   ],
   "items": [
@@ -293,6 +298,21 @@
       "type": "gold",
       "pos": 195,
       "quantity": 25
+    },
+    {
+      "_comment": "M19d content upgrade: chapel nave Lua material drop (thematic).",
+      "type": "lua_item:remixed_full_rotten_organ",
+      "pos": 88
+    },
+    {
+      "_comment": "M19d content upgrade: Lua material in the upper hall.",
+      "type": "lua_item:remixed_full_toxic_gland",
+      "pos": 40
+    },
+    {
+      "_comment": "M19d content upgrade: Lua material near the side aisle.",
+      "type": "lua_item:remixed_full_dark_gold",
+      "pos": 130
     }
   ]
 }
