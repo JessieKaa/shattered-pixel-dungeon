@@ -23,7 +23,9 @@ import com.watabou.utils.Reflection;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,6 +81,16 @@ public class LuaMob extends Mob {
 	private static final String LUA_SPAWNED = "lua_spawned";
 	private static final String LUA_IMMUNITY_CLASSES = "lua_immunity_classes";
 	private static final String STOLEN_LOOT = "lua_stolen_loot";
+	private static final String LUA_MOB_DATA = "lua_mob_data";
+
+	/**
+	 * M19b recursion / size guards for {@link #writeDataRows}. Depth caps
+	 * self-referential tables (a {@code d.self = d} cycle would otherwise
+	 * stack-overflow the traversal); rows caps runaway scripts that stuff
+	 * huge tables into per-mob save data.
+	 */
+	private static final int MAX_DATA_DEPTH = 8;
+	private static final int MAX_DATA_ROWS = 1000;
 
 	private String luaMobId;
 	private String nameStr = "???";
@@ -106,6 +118,19 @@ public class LuaMob extends Mob {
 	 * and poison itself to death.
 	 */
 	private final List<String> luaImmunityClassNames = new ArrayList<>();
+
+	/**
+	 * M19b: arbitrary per-instance Lua data, exposed to scripts as
+	 * {@code RPD.mobStoreData}/{@code mobRestoreData} and persisted across
+	 * save/load. Lets a stateful mob (e.g. FetidRat picking a random gas
+	 * "kind") keep that state without re-deriving it deterministically.
+	 * Serialised with the same safe-subset codec as {@link LuaItem}'s state
+	 * (string/number/boolean + nested tables; function/userdata/thread
+	 * skipped), plus depth/row caps (see {@link #MAX_DATA_DEPTH}). Never
+	 * null after {@link #hydrate}; an empty table simply round-trips as no
+	 * {@code lua_mob_data} key (old-save compatibility + no bloat).
+	 */
+	private LuaTable data;
 
 	/** Required for {@code Reflection.newInstance} during Bundle restore. */
 	public LuaMob() {
@@ -146,6 +171,10 @@ public class LuaMob extends Mob {
 		} else {
 			spriteClass = resolveSprite(fallbackSprite);
 		}
+		// M19b: (re)seed the per-instance Lua data table. restoreFromBundle
+		// calls hydrate before loading persisted data, so this reset is then
+		// overwritten by loadData — mirroring LuaItem's state handling.
+		data = new LuaTable();
 	}
 
 	/**
@@ -275,6 +304,26 @@ public class LuaMob extends Mob {
 		return ownerModId;
 	}
 
+	/**
+	 * M19b: the live per-instance Lua data table. Returned by
+	 * {@code RPD.mobRestoreData} so a script can read/mutate it in place; a
+	 * fresh empty table is handed out pre-{@link #hydrate} so Lua never sees
+	 * null. Persisted across save/load by {@link #storeInBundle}.
+	 */
+	LuaTable luaData() {
+		return data == null ? (data = new LuaTable()) : data;
+	}
+
+	/**
+	 * M19b: replace the per-instance Lua data table (called by
+	 * {@code RPD.mobStoreData}). A null/non-table argument is ignored
+	 * upstream, so a null here just re-seeds an empty table rather than
+	 * leaving a null that would NPE the next serialise.
+	 */
+	void luaData(LuaTable t) {
+		data = t == null ? new LuaTable() : t;
+	}
+
 	@Override
 	public String description() {
 		return nameStr;
@@ -381,6 +430,15 @@ public class LuaMob extends Mob {
 		if (loot instanceof Item) {
 			bundle.put(STOLEN_LOOT, (Item) loot);
 		}
+		// M19b: persist arbitrary Lua data. Serialise first, write the key only
+		// when at least one row survives — a table holding only
+		// function/userdata/thread (all skipped) or a depth-truncated subtree
+		// yields zero rows and is treated as empty, so we neither bloat the
+		// bundle nor write a stale empty key.
+		if (data != null) {
+			String[] rows = serializeData(data);
+			if (rows.length > 0) bundle.put(LUA_MOB_DATA, rows);
+		}
 	}
 
 	@Override
@@ -423,6 +481,125 @@ public class LuaMob extends Mob {
 		if (bundle.contains(STOLEN_LOOT)) {
 			loot = bundle.get(STOLEN_LOOT);
 			lootChance = 1f;
+		}
+		// M19b: reload arbitrary Lua data. hydrate() already reset `data` to an
+		// empty table, so this repopulates it; a malformed row is skipped
+		// (never throws) so a corrupt save cannot brick mob restore.
+		if (bundle.contains(LUA_MOB_DATA)) {
+			loadData(bundle.getStringArray(LUA_MOB_DATA));
+		}
+	}
+
+	// ---- M19b Lua data codec (mirrors LuaItem's state codec, key-typed so
+	//      numeric keys round-trip as numbers, plus depth/row caps) ----
+
+	private static String[] serializeData(LuaTable t) {
+		List<String> out = new ArrayList<>();
+		writeDataRows(t, new ArrayList<>(), out, 0);
+		return out.toArray(new String[0]);
+	}
+
+	private static void writeDataRows(LuaTable table, List<String> path, List<String> out, int depth) {
+		if (depth >= MAX_DATA_DEPTH) return;
+		for (org.luaj.vm2.Varargs k = table.next(LuaValue.NIL); !k.arg1().isnil(); k = table.next(k.arg1())) {
+			if (out.size() >= MAX_DATA_ROWS) return;
+			LuaValue key = k.arg1();
+			LuaValue val = k.arg(2);
+			String seg = encodeKey(key);
+			if (seg == null) continue; // boolean/function/table keys not persistable
+			path.add(seg);
+			if (val.istable()) {
+				writeDataRows((LuaTable) val, path, out, depth + 1);
+			} else {
+				String enc = encodeScalar(val);
+				if (enc != null && out.size() < MAX_DATA_ROWS) {
+					out.add(String.join("/", path) + "=" + enc);
+				}
+			}
+			path.remove(path.size() - 1);
+		}
+	}
+
+	/** Encode a table key as a typed, "/"-safe segment: {@code n:<double>} or {@code s:<b64>}. */
+	private static String encodeKey(LuaValue key) {
+		if (key.isnumber()) return "n:" + key.todouble();
+		if (key.isstring()) return "s:" + b64(key.tojstring());
+		return null;
+	}
+
+	/** Inverse of {@link #encodeKey}; returns null on a malformed segment. */
+	private static LuaValue decodeKey(String seg) {
+		if (seg == null || seg.length() < 3 || seg.charAt(1) != ':') return null;
+		char tag = seg.charAt(0);
+		String body = seg.substring(2);
+		switch (tag) {
+			case 'n': try { return LuaValue.valueOf(Double.parseDouble(body)); } catch (Exception e) { return null; }
+			case 's': { String s = unb64(body); return s == null ? null : LuaValue.valueOf(s); }
+			default: return null;
+		}
+	}
+
+	private static String encodeScalar(LuaValue v) {
+		if (v.isnumber()) return "n:" + v.todouble();
+		if (v.isstring()) return "s:" + b64(v.tojstring());
+		if (v.isboolean()) return "b:" + v.toboolean();
+		return null; // function/userdata/thread are not persistable
+	}
+
+	private void loadData(String[] rows) {
+		if (rows == null) return;
+		if (data == null) data = new LuaTable();
+		for (String row : rows) {
+			if (row == null) continue;
+			int eq = row.indexOf('=');
+			if (eq < 0) continue;
+			String[] parts = row.substring(0, eq).split("/");
+			LuaValue val = decodeScalar(row.substring(eq + 1));
+			if (val == null || parts.length == 0) continue;
+			LuaTable cur = data;
+			for (int i = 0; i < parts.length - 1; i++) {
+				LuaValue k = decodeKey(parts[i]);
+				if (k == null) { cur = null; break; }
+				LuaValue child = cur.get(k);
+				LuaTable sub;
+				if (child.istable()) {
+					sub = (LuaTable) child;
+				} else {
+					sub = new LuaTable();
+					cur.set(k, sub);
+				}
+				cur = sub;
+			}
+			if (cur == null) continue;
+			LuaValue leaf = decodeKey(parts[parts.length - 1]);
+			if (leaf != null) cur.set(leaf, val);
+		}
+	}
+
+	private static LuaValue decodeScalar(String encoded) {
+		if (encoded == null || encoded.length() < 2) return null;
+		char tag = encoded.charAt(0);
+		String body = encoded.substring(2);
+		switch (tag) {
+			case 'n': try { return LuaValue.valueOf(Double.parseDouble(body)); } catch (Exception e) { return null; }
+			case 's': {
+				String s = unb64(body);
+				return s == null ? null : LuaValue.valueOf(s);
+			}
+			case 'b': return LuaValue.valueOf("true".equals(body));
+			default: return null;
+		}
+	}
+
+	private static String b64(String s) {
+		return Base64.getUrlEncoder().withoutPadding().encodeToString(s.getBytes(StandardCharsets.UTF_8));
+	}
+
+	private static String unb64(String s) {
+		try {
+			return new String(Base64.getUrlDecoder().decode(s), StandardCharsets.UTF_8);
+		} catch (Exception e) {
+			return null;
 		}
 	}
 }
