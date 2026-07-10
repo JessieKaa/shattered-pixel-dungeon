@@ -280,6 +280,11 @@
     {
       "type": "lua_shop:remixed_full_alpha_shop",
       "pos": 140
+    },
+    {
+      "_comment": "M18d spawn-path validation: hostile Lua mob generated from DataDrivenLevel.",
+      "type": "lua_mob:remixed_full_kobold",
+      "pos": 50
     }
   ],
   "items": [
@@ -297,6 +302,12 @@
       "type": "gold",
       "pos": 198,
       "quantity": 50
+    },
+    {
+      "_comment": "M18d spawn-path validation: Lua-defined item generated from DataDrivenLevel.",
+      "type": "lua_item:remixed_full_battle_axe",
+      "pos": 100,
+      "quantity": 1
     }
   ]
 }

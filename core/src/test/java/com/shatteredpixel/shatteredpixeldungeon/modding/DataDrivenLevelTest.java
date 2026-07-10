@@ -180,6 +180,102 @@ public class DataDrivenLevelTest {
 		assertEquals("width survives", 16, restored.width());
 	}
 
+	// ---- Lua mobs/items spawn from JSON prefixes ----
+
+	@Test
+	public void luaMobSpawnsFromPrefix() {
+		LuaMobRegistry.clear();
+		LuaMobRegistry.register("dd_test_mob", mobTable("dd_test_mob"));
+
+		String json = "{"
+				+ "'id':'test_mob_spawn','name':'Mob Spawn',"
+				+ "'width':16,'height':16,'tiles':[" + tiles16x16() + "],"
+				+ "'entrance':17,'exit':238,'safe':true,"
+				+ "'mobs':[{'type':'lua_mob:dd_test_mob','pos':50}]"
+				+ "}";
+		DataDrivenLevel lvl = DataDrivenLevel.fromJsonValue(
+				new JsonReader().parse(json.replace('\'', '"')), "test_mob_spawn");
+		lvl.create();
+
+		assertEquals("lua_mob spec becomes one mob", 1, lvl.mobs.size());
+		Object[] mobs = lvl.mobs.toArray();
+		assertTrue("spawned mob is a LuaMob", mobs[0] instanceof LuaMob);
+		assertEquals("lua_mob placed at JSON pos", 50, ((LuaMob) mobs[0]).pos);
+
+		LuaMobRegistry.clear();
+	}
+
+	@Test
+	public void luaMobUnknownIdIsSkipped() {
+		String json = "{"
+				+ "'id':'test_mob_skip','name':'Mob Skip',"
+				+ "'width':16,'height':16,'tiles':[" + tiles16x16() + "],"
+				+ "'entrance':17,'exit':238,'safe':true,"
+				+ "'mobs':[{'type':'lua_mob:does_not_exist','pos':50}]"
+				+ "}";
+		DataDrivenLevel lvl = DataDrivenLevel.fromJsonValue(
+				new JsonReader().parse(json.replace('\'', '"')), "test_mob_skip");
+		lvl.create();
+		assertEquals("unknown lua_mob id is skipped", 0, lvl.mobs.size());
+	}
+
+	@Test
+	public void luaItemSpawnsFromPrefix() {
+		LuaItemRegistry.clear();
+		LuaItemRegistry.register("dd_test_item", itemTable("dd_test_item"));
+
+		String json = "{"
+				+ "'id':'test_item_spawn','name':'Item Spawn',"
+				+ "'width':16,'height':16,'tiles':[" + tiles16x16() + "],"
+				+ "'entrance':17,'exit':238,'safe':true,"
+				+ "'items':[{'type':'lua_item:dd_test_item','pos':90}]"
+				+ "}";
+		DataDrivenLevel lvl = DataDrivenLevel.fromJsonValue(
+				new JsonReader().parse(json.replace('\'', '"')), "test_item_spawn");
+		lvl.create();
+
+		assertNotNull("lua_item spec creates a heap at the JSON pos", lvl.heaps.get(90));
+		assertEquals("heap contains the single lua item", 1, lvl.heaps.get(90).size());
+		assertTrue("spawned item is a LuaItem", lvl.heaps.get(90).peek() instanceof LuaItem);
+
+		LuaItemRegistry.clear();
+	}
+
+	@Test
+	public void luaItemUnknownIdIsSkipped() {
+		String json = "{"
+				+ "'id':'test_item_skip','name':'Item Skip',"
+				+ "'width':16,'height':16,'tiles':[" + tiles16x16() + "],"
+				+ "'entrance':17,'exit':238,'safe':true,"
+				+ "'items':[{'type':'lua_item:does_not_exist','pos':90}]"
+				+ "}";
+		DataDrivenLevel lvl = DataDrivenLevel.fromJsonValue(
+				new JsonReader().parse(json.replace('\'', '"')), "test_item_skip");
+		lvl.create();
+		assertEquals("unknown lua_item id is skipped", null, lvl.heaps.get(90));
+	}
+
+	private static org.luaj.vm2.LuaTable mobTable(String id) {
+		org.luaj.vm2.LuaTable tbl = new org.luaj.vm2.LuaTable();
+		tbl.set("id", org.luaj.vm2.LuaValue.valueOf(id));
+		tbl.set("name", org.luaj.vm2.LuaValue.valueOf("test mob"));
+		tbl.set("hp", org.luaj.vm2.LuaValue.valueOf(10));
+		tbl.set("attack", org.luaj.vm2.LuaValue.valueOf(3));
+		tbl.set("defense", org.luaj.vm2.LuaValue.valueOf(2));
+		return tbl;
+	}
+
+	private static org.luaj.vm2.LuaTable itemTable(String id) {
+		org.luaj.vm2.LuaTable tbl = new org.luaj.vm2.LuaTable();
+		tbl.set("id", org.luaj.vm2.LuaValue.valueOf(id));
+		tbl.set("name", org.luaj.vm2.LuaValue.valueOf("test item"));
+		tbl.set("desc", org.luaj.vm2.LuaValue.valueOf("for tests"));
+		tbl.set("tier", org.luaj.vm2.LuaValue.valueOf(1));
+		tbl.set("image", org.luaj.vm2.LuaValue.valueOf(0));
+		tbl.set("type", org.luaj.vm2.LuaValue.valueOf("weapon"));
+		return tbl;
+	}
+
 	// ---- LuaLevelService CONTINUE wiring ----
 
 	@Test
