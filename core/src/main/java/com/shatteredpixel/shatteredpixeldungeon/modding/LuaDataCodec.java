@@ -67,11 +67,15 @@ final class LuaDataCodec {
     private static LuaValue deepCopy(LuaValue v, Set<LuaTable> visited, int depth) {
         if (v == null || v.isnil())   return LuaValue.NIL;
         if (v.isboolean())            return LuaValue.valueOf(v.toboolean());
-        if (v.isstring())             return LuaValue.valueOf(v.tojstring());
+        // isnumber() MUST precede isstring(): in luaj, LuaNumber/LuaInteger report
+        // isstring()==true (numbers are string-coercible), so testing isstring() first
+        // would stringify every persisted number — breaking Lua arithmetic on data
+        // values (e.g. `data.charges - 1`, `data.charges > 0`).
         if (v.isnumber()) {
             return v.isint() ? LuaValue.valueOf(v.toint())
                              : LuaValue.valueOf(v.todouble());
         }
+        if (v.isstring())             return LuaValue.valueOf(v.tojstring());
         if (v.istable()) {
             LuaTable tbl = (LuaTable) v;
             if (!visited.add(tbl)) {
@@ -118,11 +122,8 @@ final class LuaDataCodec {
             env.put(ENVELOPE_VALUE, v.toboolean());
             return env;
         }
-        if (v.isstring()) {
-            env.put(ENVELOPE_TYPE, T_STRING);
-            env.put(ENVELOPE_VALUE, v.tojstring());
-            return env;
-        }
+        // isnumber() MUST precede isstring(): luaj numbers report isstring()==true,
+        // so testing strings first would round-trip every number as a string.
         if (v.isnumber()) {
             if (v.isint()) {
                 env.put(ENVELOPE_TYPE, T_INT);
@@ -131,6 +132,11 @@ final class LuaDataCodec {
                 env.put(ENVELOPE_TYPE, T_FLOAT);
                 env.put(ENVELOPE_VALUE, (float) v.todouble());
             }
+            return env;
+        }
+        if (v.isstring()) {
+            env.put(ENVELOPE_TYPE, T_STRING);
+            env.put(ENVELOPE_VALUE, v.tojstring());
             return env;
         }
         if (v.istable()) {
