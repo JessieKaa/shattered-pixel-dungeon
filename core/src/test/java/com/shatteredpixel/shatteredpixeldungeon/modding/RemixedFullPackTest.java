@@ -197,11 +197,16 @@ public class RemixedFullPackTest {
 
     /**
      * M17a forbidden-token lint: the 6 town-NPC scripts must not reference any API the fork
-     * does not expose (chooseOption / trade/quest/story windows / gold economy / Sfx-particle /
-     * luajava). This pins the Acceptance clause "仅用 {showDialog,npcYell,giveItem,leaveTown} 子集,
-     * 不依赖 fork 缺失 API" at the source-text level — a regression where a future edit reintroduces
-     * a remished-only call (e.g. {@code chooseOption} on barman) is caught here even if the NPC
-     * still registers. Mirrors the spirit of {@code LuaNpcTest#luajavaBindClassStillUnreachableWithNpcGlobalsInjected}.
+     * does not expose (trade/quest/story windows / gold economy / Sfx-particle /
+     * luajava). This pins the Acceptance clause "仅用 fork 支持的 NPC API 子集
+     * ({showDialog,npcYell,giveItem,leaveTown,chooseOption}),不依赖 fork 缺失 API" at the
+     * source-text level — a regression where a future edit reintroduces a remished-only call
+     * is caught here even if the NPC still registers. Mirrors the spirit of
+     * {@code LuaNpcTest#luajavaBindClassStillUnreachableWithNpcGlobalsInjected}.
+     *
+     * <p>{@code chooseOption} was fork-missing at M17a (barman was downgraded to a single
+     * {@code showDialog} line); M18a ships {@code RPD.chooseOption} and re-upgrades barman to
+     * use it, so the token is no longer forbidden.
      *
      * <p>Each script is read as raw text from the mod asset path and asserted free of the
      * forbidden tokens. Reading text (not executing) keeps the lint independent of whether the
@@ -218,12 +223,12 @@ public class RemixedFullPackTest {
                 "mods/remixed_full/scripts/npcs/inquirer.lua",
         };
         // Fork LuaNpc has no dispatch for these (act/die/spawn/actionsList/execute are not routed),
-        // and RPD.* lacks the rest (chooseOption / *Window / economy / Sfx-particle / luajava).
+        // and RPD.* lacks the rest (*Window / economy / Sfx-particle / luajava).
         // "Sfx" is matched as the dotted substring ".Sfx": remished only references it as
         // RPD.Sfx.*, so the dotted form catches the call without false-positive on unrelated
         // identifiers that merely contain the letters "Sfx". Other tokens are bare substrings.
         String[] forbidden = {
-                "chooseOption", "showTradeWindow", "showQuestWindow", "showStoryWindow",
+                "showTradeWindow", "showQuestWindow", "showStoryWindow",
                 "spendGold", "uncurse", "pourSpeck", "speckEffectFactory", "playExtra",
                 "textById", "luajava", "playSound", ".Sfx", "setState", "setAi",
         };
