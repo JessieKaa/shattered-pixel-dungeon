@@ -186,6 +186,12 @@ final class RpdApi {
         rpd.set("Buffs", buffConstants());
         rpd.set("placeBlob", new PlaceBlob());
         rpd.set("addImmunity", new AddImmunity());
+        // M19b: arbitrary per-instance Lua data persistence on a LuaMob (the
+        // remished mob.storeData/restoreData equivalent). mobRestoreData
+        // returns the mob's live data table (mutate in place); mobStoreData
+        // replaces it. Persisted across save/load by LuaMob.storeInBundle.
+        rpd.set("mobRestoreData", new MobRestoreData());
+        rpd.set("mobStoreData", new MobStoreData());
         rpd.set("setMobAi", new SetMobAi());
         rpd.set("enemyOf", new EnemyOf());
         rpd.set("cellDistance", new CellDistance());
@@ -1219,6 +1225,51 @@ final class RpdApi {
                 ((LuaMob) target).addLuaImmunity(id, type);
             } catch (Exception e) {
                 Gdx.app.error(TAG, "addImmunity threw", e);
+            }
+            return NIL;
+        }
+    }
+
+    /**
+     * {@code RPD.mobRestoreData(mobId)} — return the LuaMob's per-instance data
+     * table (the remished {@code mob.restoreData(self)} equivalent). The table
+     * is returned by reference, so a script can mutate it in place
+     * ({@code local d = RPD.mobRestoreData(id); d.kind = 1}); it is persisted
+     * across save/load by {@link LuaMob#storeInBundle}. Returns NIL on a
+     * bad/missing id; never throws.
+     */
+    private static final class MobRestoreData extends OneArgFunction {
+        @Override public LuaValue call(LuaValue mobId) {
+            try {
+                LuaMob mob = resolveLuaMob(mobId, "mobRestoreData");
+                if (mob == null) return NIL;
+                return mob.luaData();
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "mobRestoreData threw", e);
+                return NIL;
+            }
+        }
+    }
+
+    /**
+     * {@code RPD.mobStoreData(mobId, data)} — replace the LuaMob's per-instance
+     * data table with {@code data} (the remished {@code mob.storeData(self,
+     * data)} equivalent). A non-table second arg is a no-op (logged) rather
+     * than wiping existing data. Persisted across save/load. Returns NIL on
+     * every path; never throws.
+     */
+    private static final class MobStoreData extends TwoArgFunction {
+        @Override public LuaValue call(LuaValue mobId, LuaValue dataVal) {
+            try {
+                LuaMob mob = resolveLuaMob(mobId, "mobStoreData");
+                if (mob == null) return NIL;
+                if (!dataVal.istable()) {
+                    Gdx.app.error(TAG, "mobStoreData expected table data, got " + dataVal.typename());
+                    return NIL;
+                }
+                mob.luaData(dataVal.checktable());
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "mobStoreData threw", e);
             }
             return NIL;
         }
