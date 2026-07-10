@@ -285,6 +285,11 @@
       "_comment": "M18d spawn-path validation: hostile Lua mob generated from DataDrivenLevel.",
       "type": "lua_mob:remixed_full_kobold",
       "pos": 50
+    },
+    {
+      "_comment": "M19d content upgrade: weak Lua mob in the isolated lower-left corner.",
+      "type": "lua_mob:remixed_full_black_rat",
+      "pos": 162
     }
   ],
   "items": [
@@ -308,6 +313,16 @@
       "type": "lua_item:remixed_full_battle_axe",
       "pos": 100,
       "quantity": 1
+    },
+    {
+      "_comment": "M19d content upgrade: Lua material drop in an isolated corner.",
+      "type": "lua_item:remixed_full_dark_gold",
+      "pos": 158
+    },
+    {
+      "_comment": "M19d content upgrade: Lua food material in the lower-left area.",
+      "type": "lua_item:remixed_full_remixed_ration",
+      "pos": 193
     }
   ]
 }
