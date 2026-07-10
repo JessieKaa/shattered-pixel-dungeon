@@ -18,6 +18,7 @@ import org.luaj.vm2.Globals;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
 import org.luaj.vm2.lib.TwoArgFunction;
+import org.luaj.vm2.lib.ThreeArgFunction;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -217,6 +218,154 @@ public class LuaTrapRegistryTest {
 		LuaLevelService.placeLuaTraps(lvl);
 		assertNull("entrance must never get a trap", lvl.traps.get(((StubLevel) lvl).entranceCell));
 		assertNull("exit must never get a trap", lvl.traps.get(((StubLevel) lvl).exitCell));
+	}
+
+	// ---- M19a: data field + onActivate third arg ----
+
+	@Test
+	public void activate_passesDataAsThirdArg() {
+		LuaTable spec = baseTable("demo_trap");
+		LuaTable data = new LuaTable();
+		data.set("message", LuaValue.valueOf("snap"));
+		data.set("damage", LuaValue.valueOf(5));
+		spec.set("data", data);
+		final LuaValue[] captured = { null };
+		spec.set("onActivate", new ThreeArgFunction() {
+			@Override public LuaValue call(LuaValue cell, LuaValue charId, LuaValue d) {
+				captured[0] = d;
+				return NIL;
+			}
+		});
+		LuaTrapRegistry.register("demo_trap", spec);
+
+		LuaTrap trap = new LuaTrap(spec);
+		trap.pos = 4;
+		trap.activate();
+
+		assertTrue("data must reach onActivate as a table",
+				captured[0] != null && captured[0].istable());
+		LuaTable got = (LuaTable) captured[0];
+		assertEquals("snap", got.get("message").tojstring());
+		assertEquals(5, got.get("damage").toint());
+	}
+
+	@Test
+	public void dataPersists_acrossBundleRoundTrip() {
+		LuaTable spec = baseTable("demo_trap");
+		LuaTable data = new LuaTable();
+		data.set("message", LuaValue.valueOf("persisted"));
+		data.set("count", LuaValue.valueOf(3));
+		spec.set("data", data);
+		final LuaValue[] captured = { null };
+		spec.set("onActivate", new ThreeArgFunction() {
+			@Override public LuaValue call(LuaValue cell, LuaValue charId, LuaValue d) {
+				captured[0] = d;
+				return NIL;
+			}
+		});
+		LuaTrapRegistry.register("demo_trap", spec);
+
+		LuaTrap t1 = new LuaTrap(spec);
+		t1.pos = 2;
+		Bundle b = new Bundle();
+		t1.storeInBundle(b);
+
+		LuaTrap t2 = new LuaTrap();
+		t2.restoreFromBundle(b);
+		t2.pos = 2;
+		captured[0] = null;
+		t2.activate();
+
+		assertTrue("restored trap still carries data",
+				captured[0] != null && captured[0].istable());
+		assertEquals("persisted", ((LuaTable) captured[0]).get("message").tojstring());
+		assertEquals(3, ((LuaTable) captured[0]).get("count").toint());
+	}
+
+	@Test
+	public void createDeepCopiesData_isolatedFromSpecAndSibling() {
+		// One shared spec/registry entry; each instance must carry its own data snapshot.
+		LuaTable spec = baseTable("trap_iso");
+		LuaTable data = new LuaTable();
+		data.set("msg", LuaValue.valueOf("original"));
+		spec.set("data", data);
+		final LuaValue[] captured = { null };
+		spec.set("onActivate", new ThreeArgFunction() {
+			@Override public LuaValue call(LuaValue cell, LuaValue charId, LuaValue d) {
+				captured[0] = d;
+				return NIL;
+			}
+		});
+		LuaTrapRegistry.register("trap_iso", spec);
+
+		LuaTrap a = new LuaTrap(spec);
+		a.pos = 1;
+		// Mutate the spec's data table AFTER instance A was created.
+		data.set("msg", LuaValue.valueOf("mutated"));
+
+		a.activate();
+		assertEquals("A snapshots data at create time (deep copy, not a spec reference)",
+				"original", ((LuaTable) captured[0]).get("msg").tojstring());
+
+		// B is created AFTER the spec mutation, so it snapshots the new value.
+		LuaTrap b = new LuaTrap(spec);
+		b.pos = 2;
+		captured[0] = null;
+		b.activate();
+		assertEquals("B snapshots post-mutation spec data",
+				"mutated", ((LuaTable) captured[0]).get("msg").tojstring());
+
+		// A is unaffected by B's existence — data is per-instance.
+		captured[0] = null;
+		a.activate();
+		assertEquals("A data independent of sibling B",
+				"original", ((LuaTable) captured[0]).get("msg").tojstring());
+	}
+
+	@Test
+	public void legacyTwoArgCallback_toleratesThirdArg() {
+		// A legacy 2-arg onActivate must keep working when data is present
+		// (luaj drops surplus args on invoke).
+		LuaTable spec = baseTable("demo_trap");
+		LuaTable data = new LuaTable();
+		data.set("v", LuaValue.valueOf(1));
+		spec.set("data", data);
+		final int[] received = { -1, -2 };
+		spec.set("onActivate", new TwoArgFunction() {
+			@Override public LuaValue call(LuaValue cell, LuaValue charId) {
+				received[0] = cell.toint();
+				received[1] = charId.toint();
+				return NIL;
+			}
+		});
+		LuaTrapRegistry.register("demo_trap", spec);
+
+		LuaTrap trap = new LuaTrap(spec);
+		trap.pos = 9;
+		trap.activate(); // must not throw
+
+		assertEquals(9, received[0]);
+		assertEquals(0, received[1]);
+	}
+
+	@Test
+	public void noData_passesNilThirdArg() {
+		LuaTable spec = baseTable("demo_trap");
+		// no data field — third arg should be nil
+		final LuaValue[] captured = { LuaValue.valueOf("unset") };
+		spec.set("onActivate", new ThreeArgFunction() {
+			@Override public LuaValue call(LuaValue cell, LuaValue charId, LuaValue d) {
+				captured[0] = d;
+				return NIL;
+			}
+		});
+		LuaTrapRegistry.register("demo_trap", spec);
+
+		LuaTrap trap = new LuaTrap(spec);
+		trap.pos = 3;
+		trap.activate();
+
+		assertTrue("trap without data passes nil as the third arg", captured[0].isnil());
 	}
 
 	// ---- helpers ----
