@@ -151,6 +151,11 @@ final class RpdApi {
         rpd.set("charHP", new CharHP());
         rpd.set("charPos", new CharPos());
         rpd.set("charName", new CharName());
+        // M20b: the only primitive that *produces* a hero char id. Every other
+        // hero-id API (healChar/charHP/heroMana…) receives the id as a param
+        // (spells get it via onUse(heroId), NPCs via onInteract(selfId,heroId));
+        // an ally's act(selfId) had no way to reference the hero it should help.
+        rpd.set("heroId", new HeroId());
         // M3a: spawnMob injects a Lua-defined hostile mob at GameScene.add level,
         // bypassing Level.createMob/MobSpawner/mobsToSpawn (C3/C4: vanilla spawn
         // balance untouched). The mob is not part of the rotation pool.
@@ -548,6 +553,19 @@ final class RpdApi {
         @Override public LuaValue call(LuaValue charId) {
             Char c = resolveChar(charId);
             return c == null ? NIL : LuaValue.valueOf(c.name());
+        }
+    }
+
+    /**
+     * {@code RPD.heroId()} → the hero's char id, or {@code NIL} when no hero is
+     * bound (headless tests, pre-game). M20b addition: closes the M3b ally gap
+     * where {@code act(selfId)} had no way to reference the hero a support ally
+     * (healing wisp) is meant to help. Pure addition — no existing method touched.
+     */
+    private static final class HeroId extends ZeroArgFunction {
+        @Override public LuaValue call() {
+            Hero h = Dungeon.hero;
+            return h == null ? NIL : LuaValue.valueOf(h.id());
         }
     }
 
