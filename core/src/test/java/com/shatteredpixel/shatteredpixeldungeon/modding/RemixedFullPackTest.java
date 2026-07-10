@@ -149,6 +149,13 @@ public class RemixedFullPackTest {
                 LuaItemRegistry.contains("remixed_full_rotten_fish"));
         assertTrue("fried_fish registered",
                 LuaItemRegistry.contains("remixed_full_fried_fish"));
+        // M20g: 3 new rf items (weapon + eatable food + pure material).
+        assertTrue("rf_bone_saw registered",
+                LuaItemRegistry.contains("rf_bone_saw"));
+        assertTrue("rf_tengu_liver registered",
+                LuaItemRegistry.contains("rf_tengu_liver"));
+        assertTrue("rf_soul_shard registered",
+                LuaItemRegistry.contains("rf_soul_shard"));
 
         // 5 spells.
         assertTrue("magic_arrow registered",
@@ -161,6 +168,11 @@ public class RemixedFullPackTest {
                 LuaSpellRegistry.contains("remixed_full_iron_skin"));
         assertTrue("ignite registered",
                 LuaSpellRegistry.contains("remixed_full_ignite"));
+        // M20g: 2 new rf spells (self haste + cell lightning).
+        assertTrue("rf_haste registered",
+                LuaSpellRegistry.contains("rf_haste"));
+        assertTrue("rf_lightning_bolt registered",
+                LuaSpellRegistry.contains("rf_lightning_bolt"));
 
         // 6 mobs.
         assertTrue("kobold registered",
@@ -202,8 +214,8 @@ public class RemixedFullPackTest {
         assertTrue("inquirer NPC registered",
                 LuaNpcRegistry.contains("remixed_full_inquirer"));
 
-        assertEquals("14 items", 14, LuaItemRegistry.size());
-        assertEquals("5 spells", 5, LuaSpellRegistry.size());
+        assertEquals("17 items", 17, LuaItemRegistry.size());
+        assertEquals("7 spells", 7, LuaSpellRegistry.size());
         assertEquals("6 mobs", 6, LuaMobRegistry.size());
         assertEquals("6 town NPCs", 6, LuaNpcRegistry.size());
         assertEquals("1 shop", 1, LuaShopRegistry.size());
