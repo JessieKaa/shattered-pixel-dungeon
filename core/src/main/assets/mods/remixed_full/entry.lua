@@ -18,3 +18,11 @@ register_level{
     id = "remixed_full_chapel",
     name = "Remixed Full Chapel",
 }
+
+-- M20f: a combat-focused showcase level. JSON (mods/levels/remixed_full_rf_arena.json) is
+-- 16x16 with statue pillars, and spawns the mobs/items NOT already used by tavern/chapel
+-- (bandit/hedgehog/fetid_rat + kunai/vile_essence/rusty_coin) via lua_mob:/lua_item: specs.
+register_level{
+    id = "remixed_full_rf_arena",
+    name = "Remixed Full RF Arena",
+}
