@@ -2,7 +2,7 @@
   "id": "demo_m58",
   "name": "M5-M8 测试包",
   "version": "0.1.0",
-  "spd_version": 896,
+  "spd_version": 900,
   "author": "fork",
   "default_enabled": false,
   "entry": "init.lua",

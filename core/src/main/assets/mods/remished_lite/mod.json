@@ -2,7 +2,7 @@
   "id": "remished_lite",
   "name": "Remished Lite (内置展示包)",
   "version": "0.1.0",
-  "spd_version": 896,
+  "spd_version": 900,
   "author": "fork",
   "default_enabled": true,
   "entry": "entry.lua",

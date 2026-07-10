@@ -2,7 +2,7 @@
   "id": "remixed_full",
   "name": "Remixed Full (Alpha)",
   "version": "0.1.0",
-  "spd_version": 896,
+  "spd_version": 900,
   "author": "fork",
   "default_enabled": false,
   "entry": "entry.lua",
