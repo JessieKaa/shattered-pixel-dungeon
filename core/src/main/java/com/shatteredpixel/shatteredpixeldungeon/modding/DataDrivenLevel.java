@@ -73,6 +73,10 @@ public class DataDrivenLevel extends Level {
 	private static final String LUA_NPC_PREFIX = "lua_npc:";
 	/** Mob-spec type prefix that routes a {@link LuaShopNpc} into a level via the registry. */
 	private static final String LUA_SHOP_PREFIX = "lua_shop:";
+	/** Mob-spec type prefix that routes a {@link LuaMob} into a level via the registry. */
+	private static final String LUA_MOB_PREFIX = "lua_mob:";
+	/** Item-spec type prefix that routes a Lua-defined item into a level via the registry. */
+	private static final String LUA_ITEM_PREFIX = "lua_item:";
 
 	private String luaLevelId;
 	private int entranceCell;
@@ -253,6 +257,24 @@ public class DataDrivenLevel extends Level {
 				mobs.add(shop);
 				continue;
 			}
+			// M18d: lua_mob:<id> instantiates a hostile Lua-defined mob from LuaMobRegistry,
+			// mirroring the lua_npc/lua_shop branches. Handled before MOB_TYPES for the same
+			// reason (the type carries a dynamic id that cannot live in the static whitelist).
+			if (spec.type != null && spec.type.startsWith(LUA_MOB_PREFIX)) {
+				String mobId = spec.type.substring(LUA_MOB_PREFIX.length());
+				LuaMob mob = LuaMobRegistry.create(mobId);
+				if (mob == null) {
+					Gdx.app.error(TAG, "unknown lua_mob id: " + mobId + " — skipping");
+					continue;
+				}
+				if (spec.pos < 0 || spec.pos >= length() || !passable[spec.pos]) {
+					Gdx.app.error(TAG, "lua_mob " + mobId + " pos " + spec.pos + " invalid — skipping");
+					continue;
+				}
+				mob.pos = spec.pos;
+				mobs.add(mob);
+				continue;
+			}
 			Class<? extends Mob> cls = MOB_TYPES.get(spec.type);
 			if (cls == null) {
 				Gdx.app.error(TAG, "unknown mob type: " + spec.type + " — skipping");
@@ -271,6 +293,24 @@ public class DataDrivenLevel extends Level {
 	@Override
 	protected void createItems() {
 		for (ItemSpec spec : itemSpecs) {
+			// M18d: lua_item:<id> instantiates a Lua-defined item from LuaItemRegistry.
+			// createItem returns the typed dispatch result (LuaMaterial for materials,
+			// LuaItem for everything else). Handled before ITEM_TYPES because the type
+			// carries a dynamic id that cannot live in the static factory whitelist.
+			if (spec.type != null && spec.type.startsWith(LUA_ITEM_PREFIX)) {
+				String itemId = spec.type.substring(LUA_ITEM_PREFIX.length());
+				Item item = LuaItemRegistry.createItem(itemId);
+				if (item == null) {
+					Gdx.app.error(TAG, "unknown lua_item id: " + itemId + " — skipping");
+					continue;
+				}
+				if (spec.pos < 0 || spec.pos >= length()) {
+					Gdx.app.error(TAG, "lua_item " + itemId + " pos " + spec.pos + " invalid — skipping");
+					continue;
+				}
+				drop(item, spec.pos);
+				continue;
+			}
 			ItemFactory f = ITEM_TYPES.get(spec.type);
 			if (f == null) {
 				Gdx.app.error(TAG, "unknown item type: " + spec.type + " — skipping");
