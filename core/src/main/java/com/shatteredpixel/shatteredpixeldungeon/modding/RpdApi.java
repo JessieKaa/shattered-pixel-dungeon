@@ -1014,8 +1014,9 @@ final class RpdApi {
                 Game.runOnRenderThread(() -> GameScene.show(
                         new com.shatteredpixel.shatteredpixeldungeon.windows.WndOptions(title, "", opts) {
                             @Override protected void onSelect(int index) {
-                                // onSelect passes -1 when the window is dismissed
-                                // without a choice (e.g. back); only real picks fire.
+                                // WndOptions fires onSelect only for a real button
+                                // pick (back/cancel hides the window without calling
+                                // it); index is 0-based, mapped to 1-based for Lua.
                                 dispatchChoice(callback, index);
                             }
                         }));
@@ -1053,10 +1054,10 @@ final class RpdApi {
     /**
      * Invoke the chooseOption Lua {@code callback} with a 1-based index derived
      * from the Wnd's 0-based {@code selectedIndex}. Returns false (no-op) when
-     * {@code selectedIndex < 0} (window dismissed without a choice) or the
-     * callback is missing/not a function; swallows any Lua error via
-     * {@code Gdx.app.error} so a misbehaving callback cannot crash the render
-     * thread. Pure logic, headless-testable.
+     * {@code selectedIndex < 0} (defensive guard for package-private seam; current
+     * WndOptions always passes a real index) or the callback is missing/not a
+     * function; swallows any Lua error via {@code Gdx.app.error} so a misbehaving
+     * callback cannot crash the render thread. Pure logic, headless-testable.
      */
     static boolean dispatchChoice(LuaValue callback, int selectedIndex) {
         if (selectedIndex < 0) return false;
